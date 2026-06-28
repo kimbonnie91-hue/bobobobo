@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LF Mall CRM 고객 여정 대시보드</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+:root{
+  --bg:#F5F6FA;--surface:#FFF;--border:#E2E6F0;
+  --text:#1C1B19;--sub:#4E4D48;--muted:#96938C;
+  --sms-c:#B83A3A;--sms-bg:#FEF2F2;
+  --ali-c:#A07010;--ali-bg:#FEF8EA;
+  --fri-c:#367A4C;--fri-bg:#EEF8F1;
+  --eml-c:#2E68B0;--eml-bg:#EEF3FA;
+  --new-c:#367A4C;--new-bg:#EBF8F2;--new-b:#B4DEC8;
+  --mod-c:#2E68B0;--mod-bg:#EEF3FA;--mod-b:#B4CCE8;
+  --kep-c:#706E68;--kep-bg:#F2F1EE;--kep-b:#D8D6CE;
+  --del-c:#B03030;--del-bg:#FEF1F0;--del-b:#E8C0BC;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;font-size:13px;line-height:1.5}
+
+/* ── Topbar ── */
+.topbar{position:sticky;top:0;z-index:200;background:#1C1B19;display:flex;align-items:center;gap:10px;padding:0 20px;height:48px;border-bottom:1px solid #333}
+.tb-logo{display:flex;align-items:center;gap:8px}
+.tb-icon{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#9070C8,#C080A0);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;letter-spacing:-.03em}
+.tb-title{font-size:11.5px;color:#A8A4A0}
+.tb-sep{flex:1}
+.tb-saved{font-family:'DM Mono',monospace;font-size:9px;color:#70A880;display:flex;align-items:center;gap:4px;opacity:0;transition:opacity .4s}
+.tb-saved.show{opacity:1}
+.tb-saved-dot{width:6px;height:6px;border-radius:50%;background:#70A880}
+.tb-btn{padding:5px 11px;border-radius:6px;border:1px solid #363432;background:transparent;color:#A8A4A0;cursor:pointer;font-size:11px;font-family:'Noto Sans KR',sans-serif;display:flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap}
+.tb-btn:hover{background:#282624;border-color:#555;color:#E0DDD8}
+.tb-burger{width:30px;height:30px;border-radius:7px;border:1px solid #363432;background:transparent;color:#C8C4BE;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+.tb-burger:hover{background:#282624;border-color:#555;color:#fff}
+#importInput{display:none}
+
+/* ── Sidebar (필터) ── */
+.sidebar{position:fixed;left:0;top:48px;bottom:0;width:216px;background:#fff;border-right:1px solid var(--border);z-index:100;display:flex;flex-direction:column;transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:1px 0 6px rgba(0,0,0,.02)}
+.side-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px}
+.side-title{font-size:13px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:6px}
+.side-title::before{content:'⚙';font-size:12px;opacity:.6}
+.side-reset{border:none;background:transparent;color:var(--muted);font-size:10.5px;cursor:pointer;font-family:'Noto Sans KR',sans-serif;padding:3px 6px;border-radius:5px;transition:all .12s}
+.side-reset:hover{background:var(--bg);color:var(--sub)}
+.side-body{flex:1;overflow-y:auto;padding:4px 16px 24px}
+.fsearch{width:100%;border:1px solid var(--border);border-radius:9px;padding:8px 11px;font-size:12px;font-family:'Noto Sans KR',sans-serif;color:var(--text);outline:none;background:#F8F9FC;margin-bottom:14px;transition:border-color .15s,box-shadow .15s}
+.fsearch:focus{border-color:#9AAAC8;background:#fff;box-shadow:0 0 0 3px rgba(46,104,176,.08)}
+.fsec{margin-bottom:15px}
+.fsec-t{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
+.fchips{display:flex;flex-wrap:wrap;gap:5px}
+.fchip{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--sub);transition:all .12s;user-select:none}
+.fchip:hover{border-color:#B8BCC8;background:#FAFBFD}
+.fchip.on{font-weight:600}
+.fdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.fcount{margin-top:6px;padding-top:12px;border-top:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-align:center}
+
+/* ── Content ── */
+.content{padding:18px 22px 60px;margin-left:216px;transition:margin-left .22s cubic-bezier(.4,0,.2,1)}
+body.sidebar-collapsed .sidebar{transform:translateX(-100%)}
+body.sidebar-collapsed .content{margin-left:0}
+.empty-state{text-align:center;padding:70px 20px;color:var(--muted);font-size:13px;line-height:2}
+
+/* ── Stage Section ── */
+.stage-section{margin-bottom:14px;border-radius:14px;overflow:hidden;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.stage-head{padding:13px 18px;color:#fff;display:flex;align-items:center;gap:8px;position:relative;user-select:none}
+.stage-head-label{font-size:14px;font-weight:700;letter-spacing:-.01em;cursor:text;flex:1;padding:2px 0}
+.stage-head-label-input{font-size:14px;font-weight:700;background:rgba(255,255,255,.2);border:1.5px solid rgba(255,255,255,.5);border-radius:5px;color:#fff;padding:2px 8px;font-family:'Noto Sans KR',sans-serif;outline:none;flex:1;min-width:140px}
+.stage-head-mosu{font-family:'DM Mono',monospace;font-size:9px;opacity:.6;cursor:text;padding:2px 0}
+.stage-head-mosu-input{font-family:'DM Mono',monospace;font-size:9px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:4px;color:#fff;padding:1px 6px;outline:none;width:100px}
+.stage-color-btn{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.45);background:rgba(255,255,255,.18);cursor:pointer;display:none;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;transition:all .15s}
+.stage-color-btn:hover{background:rgba(255,255,255,.32)}
+.stage-head:hover .stage-color-btn{display:flex}
+#stageColorPicker{position:fixed;opacity:0;pointer-events:none;width:0;height:0}
+
+/* ── Gap Row ── */
+.gap-row{padding:7px 18px;background:#FFFCF0;border-bottom:1px solid #F0E4A0;font-size:11.5px;color:#8A7030;display:flex;align-items:flex-start;gap:5px}
+.gap-icon{flex-shrink:0;margin-top:1px}
+.gap-text{flex:1;cursor:text}
+.gap-text-input{flex:1;font-size:11.5px;color:#8A7030;background:transparent;border:none;border-bottom:1.5px dashed #C0A060;outline:none;font-family:'Noto Sans KR',sans-serif;width:100%}
+
+/* ── View Rows ── */
+.view-row{padding:12px 18px 14px;background:var(--surface)}
+.view-row.tobe{background:#FAFBFE}
+.row-meta{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.row-label{font-family:'DM Mono',monospace;font-size:8.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:600}
+.row-count{font-family:'DM Mono',monospace;font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid transparent}
+.mid-divider{height:1px;background:#D8DCE8}
+
+/* ── Cards ── */
+.cards-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.cards-scroll::-webkit-scrollbar{height:4px}
+.cards-scroll::-webkit-scrollbar-thumb{background:#D0D4DE;border-radius:2px}
+
+.card{flex:0 0 210px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:grab;transition:box-shadow .15s,transform .1s;position:relative;border-left:3px solid #ccc}
+.card:hover{box-shadow:0 4px 18px rgba(0,0,0,.09);transform:translateY(-1px)}
+.card:active{cursor:grabbing}
+.card.dragging{opacity:.4;box-shadow:none}
+.card.drop-before{box-shadow:-3px 0 0 0 #7B6BC8}
+.card.drop-after{box-shadow:3px 0 0 0 #7B6BC8}
+.cards-scroll.drop-hot{outline:2px dashed #B4B0D8;outline-offset:-3px;border-radius:8px;background:rgba(123,107,200,.04)}
+.card-badges{display:flex;align-items:center;gap:4px;margin-bottom:7px;flex-wrap:wrap;row-gap:4px}
+.ch-badge{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600;font-family:'DM Mono',monospace;letter-spacing:.02em;border:1px solid transparent;white-space:nowrap;flex-shrink:0}
+.push-badge{font-size:8.5px;padding:2px 6px;border-radius:8px;background:#3A3E46;color:#E8E4DE;font-family:'DM Mono',monospace;white-space:nowrap;flex-shrink:0}
+.status-badge{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600;cursor:pointer;user-select:none;border:1px solid transparent;transition:opacity .1s;white-space:nowrap;flex-shrink:0}
+.status-badge:hover{opacity:.75}
+/* lucide 아이콘 (이모지 대체) */
+.ch-badge,.push-badge,.det-ch{display:inline-flex;align-items:center;gap:3px}
+.lic{width:1.2em;height:1.2em;flex:0 0 auto;vertical-align:-0.15em}
+.card-code{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;justify-content:space-between}
+.card-actions{display:flex;gap:3px;opacity:0;transition:opacity .15s}
+.card:hover .card-actions{opacity:1}
+.act-btn{width:20px;height:20px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .1s}
+.act-btn:hover{background:var(--bg);border-color:#C0C4CC}
+.act-del:hover{background:#FEF1F0;color:#B03030;border-color:#E8C0BC}
+.card-label{font-size:11.5px;font-weight:600;margin-bottom:5px;line-height:1.4}
+.card-timing{font-family:'DM Mono',monospace;font-size:10px;color:var(--text);font-weight:500}
+.add-btn{flex:0 0 40px;height:86px;border:1.5px dashed #C8CCDA;border-radius:10px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;color:#B4B8C4;transition:all .15s}
+.add-btn:hover{border-color:#8A8E9A;color:#606470;background:rgba(0,0,0,.012)}
+
+/* ── Detail Panel ── */
+.det-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.18);z-index:140;backdrop-filter:blur(1px)}
+.det-overlay.on{display:block}
+.det-panel{position:fixed;right:0;top:48px;bottom:0;width:380px;background:#fff;border-left:1px solid var(--border);transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:150;display:flex;flex-direction:column;overflow:hidden;box-shadow:-4px 0 24px rgba(0,0,0,.08)}
+.det-panel.on{transform:translateX(0)}
+.det-close{position:absolute;top:12px;right:12px;width:28px;height:28px;background:#F0F2F6;border:1px solid var(--border);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--muted);z-index:10;transition:all .1s}
+.det-close:hover{background:var(--border)}
+.det-head{padding:18px 18px 14px;border-bottom:1px solid var(--border)}
+.det-code{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:4px}
+.det-title{font-size:15px;font-weight:700;margin-bottom:8px}
+.det-body{padding:14px 18px;overflow-y:auto;flex:1}
+.det-lbl{font-family:'DM Mono',monospace;font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:12px;margin-bottom:4px}
+.det-lbl:first-child{margin-top:0}
+.det-val{background:#F5F7FC;border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--sub);line-height:1.7;white-space:pre-wrap;word-break:keep-all}
+.det-val.hl{border-left:3px solid #2E68B0;background:#EEF3FA}
+.det-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px}
+
+/* ── Modal ── */
+.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.modal-ov.on{display:flex}
+.modal{background:#fff;border-radius:14px;width:540px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.18)}
+.modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-head-title{font-size:14px;font-weight:700}
+.modal-x{width:28px;height:28px;border:1px solid var(--border);border-radius:50%;background:#F4F5F8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .1s}
+.modal-x:hover{background:var(--border)}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+.form-row{display:flex;gap:10px;margin-bottom:12px}
+.fg{display:flex;flex-direction:column;flex:1}
+.fg.half{flex:.5}
+.fg label{font-size:9.5px;font-weight:600;color:var(--muted);margin-bottom:4px;letter-spacing:.05em;text-transform:uppercase}
+.fg input,.fg select,.fg textarea{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;font-family:'Noto Sans KR',sans-serif;color:var(--text);outline:none;background:#fff;width:100%;transition:border-color .15s,box-shadow .15s}
+.fg input:focus,.fg select:focus,.fg textarea:focus{border-color:#9AAAC8;box-shadow:0 0 0 3px rgba(46,104,176,.08)}
+.fg textarea{resize:vertical}
+.push-wrap{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;user-select:none;height:35px;transition:border-color .15s}
+.push-wrap:hover{border-color:#9AAAC8}
+.push-wrap input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:#3A3E46}
+.push-wrap span{font-size:12px}
+.st-btns{display:flex;gap:6px;flex-wrap:wrap}
+.st-btn{padding:5px 12px;border-radius:8px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--muted);transition:all .12s}
+.st-btn.on-new{background:var(--new-bg);color:var(--new-c);border-color:var(--new-b)}
+.st-btn.on-mod{background:var(--mod-bg);color:var(--mod-c);border-color:var(--mod-b)}
+.st-btn.on-kep{background:var(--kep-bg);color:var(--kep-c);border-color:var(--kep-b)}
+.st-btn.on-del{background:var(--del-bg);color:var(--del-c);border-color:var(--del-b)}
+.modal-foot{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+.btn{padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-family:'Noto Sans KR',sans-serif;font-weight:600;transition:all .15s}
+.btn-primary{background:#1C1B19;color:#fff}
+.btn-primary:hover{background:#333330}
+.btn-ghost{background:#fff;color:var(--sub);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--bg)}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:#D0D4DE;border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="tb-burger" onclick="toggleSidebar()" title="필터 패널 열기/닫기">☰</button>
+  <div class="tb-logo">
+    <div class="tb-icon">LF</div>
+    <span class="tb-title">LF Mall CRM · 고객 여정 대시보드</span>
+  </div>
+  <div class="tb-sep"></div>
+  <div class="tb-saved" id="tbSaved"><div class="tb-saved-dot"></div><span>저장됨</span></div>
+  <button class="tb-btn" onclick="exportJSON()">💾 내보내기</button>
+  <button class="tb-btn" onclick="document.getElementById('importInput').click()">📂 불러오기</button>
+  <input type="file" id="importInput" accept=".json" onchange="importJSON(event)">
+</div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="side-head">
+    <span class="side-title">필터</span>
+    <button class="side-reset" onclick="resetFilters()">초기화</button>
+  </div>
+  <div class="side-body" id="sideBody"></div>
+</aside>
+
+<div class="content" id="content"></div>
+
+<div class="det-overlay" id="detOv" onclick="closeDet()"></div>
+<div class="det-panel" id="detPanel">
+  <div class="det-close" onclick="closeDet()">×</div>
+  <div id="detContent" style="flex:1;display:flex;flex-direction:column;overflow:hidden"></div>
+</div>
+
+<div class="modal-ov" id="modalOv">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-head-title" id="modalTitle">캠페인 추가</span>
+      <button class="modal-x" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="fg half"><label>AF코드</label><input id="fCode" type="text" placeholder="예: AF-LL01"></div>
+        <div class="fg half"><label>발송 채널</label>
+          <select id="fCh">
+            <option value="sms">SMS</option>
+            <option value="alimtok">알림톡</option>
+            <option value="friends">플친메시지</option>
+            <option value="email">이메일</option>
+            <option value="inapp">인앱메시지</option>
+            <option value="none">없음</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row"><div class="fg"><label>캠페인명</label><input id="fLabel" type="text" placeholder="캠페인명을 입력하세요"></div></div>
+      <div class="form-row">
+        <div class="fg half"><label>발송 타이밍</label><input id="fTiming" type="text" placeholder="예: 가입 D+1 · 구매 D+7 · 실시간"></div>
+        <div class="fg half"><label>&nbsp;</label>
+          <label class="push-wrap"><input type="checkbox" id="fPush"><span><i data-lucide="bell" class="lic"></i> PUSH 병행</span></label>
+        </div>
+      </div>
+      <div class="form-row" id="fStatusRow">
+        <div class="fg"><label>변경 유형 (TO-BE)</label>
+          <div class="st-btns" id="fStatusBtns">
+            <button class="st-btn" data-s="new"  onclick="pickStatus('new')">신규추가</button>
+            <button class="st-btn" data-s="mod"  onclick="pickStatus('mod')">수정개선</button>
+            <button class="st-btn" data-s="kep"  onclick="pickStatus('kep')">유지</button>
+            <button class="st-btn" data-s="del"  onclick="pickStatus('del')">삭제검토</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row"><div class="fg"><label>트리거 조건</label><textarea id="fTrigger" rows="2" placeholder="발송 조건"></textarea></div></div>
+      <div class="form-row"><div class="fg"><label>오퍼 / 혜택</label><textarea id="fOffer" rows="2" placeholder="제공 혜택"></textarea></div></div>
+      <div class="form-row"><div class="fg"><label>메시지 / 문구</label><textarea id="fMessage" rows="4" placeholder="발송 메시지 문구"></textarea></div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveCard()">저장</button>
+    </div>
+  </div>
+</div>
+
+<input type="color" id="stageColorPicker" style="position:fixed;opacity:0;pointer-events:none;width:0;height:0">
+
+<script>
+const CH={
+  sms:    {label:'SMS',    c:'#B83A3A',bg:'#FEF2F2',lucide:'message-square-text'},
+  alimtok:{label:'알림톡',c:'#A07010',bg:'#FEF8EA',lucide:'message-circle'},
+  friends:{label:'플친',  c:'#367A4C',bg:'#EEF8F1',lucide:'heart'},
+  email:  {label:'이메일',c:'#2E68B0',bg:'#EEF3FA',lucide:'mail'},
+  inapp:  {label:'인앱',  c:'#7B5BC0',bg:'#F3EFFB',lucide:'app-window'},
+  none:   {label:'없음',  c:'#96938C',bg:'#F2F1EE',lucide:'ban'},
+};
+const ST={
+  new:{label:'신규추가',c:'#367A4C',bg:'#EBF8F2',b:'#B4DEC8'},
+  mod:{label:'수정개선',c:'#2E68B0',bg:'#EEF3FA',b:'#B4CCE8'},
+  kep:{label:'유지',    c:'#706E68',bg:'#F2F1EE',b:'#D8D6CE'},
+  del:{label:'삭제검토',c:'#B03030',bg:'#FEF1F0',b:'#E8C0BC'},
+};
+const ST_ORDER=['new','mod','kep','del'];
+const STORE_KEY='lfmall_crm_v3';
+
+// ── lucide 아이콘 헬퍼 (이모지 대체) ──
+function licon(n){return `<i data-lucide="${n}" class="lic"></i>`;}
+function refreshIcons(){if(window.lucide&&window.lucide.createIcons){try{lucide.createIcons();}catch(e){}}}
+
+// ── 필터 상태 (빈 Set = 전체) ──
+let FILTERS={search:'',channels:new Set(),statuses:new Set(),views:new Set(),stages:new Set(),pushOnly:false};
+
+let STAGES=[
+  {id:0,label:'가입 / 미구매',      color:'#7B6BC8',mosu:'33,167명/월',gap:'골든타임(0~2h) 트리거 공백 — 첫 접점이 가입 D+1 SMS'},
+  {id:1,label:'탐색 / 구매결정',    color:'#C86868',mosu:'상시',       gap:'주문서(결제창) 이탈 대응 전무 — PUSH 동의율 순증 –300명/월'},
+  {id:2,label:'1회구매 → 재구매',   color:'#5080C0',mosu:'29,647명/월',gap:'배송완료→D+7 사이 7일 공백 — 리뷰 유도·알림톡 미활용'},
+  {id:3,label:'2회구매 → VIP 이관', color:'#B8900A',mosu:'17,791명/월',gap:'3회 구매 후 VIP 이관 자동화 없음 — 등급 넛지(인앱) 전무'},
+  {id:4,label:'VIP / Win-back',     color:'#488C5C',mosu:'24,195명/월',gap:'일반 고객 Win-back 시퀀스 전무 — EV00 VIP 30일 미방문만 대응'},
+];
+
+let _uid=1000;
+function uid(){return 'c'+(++_uid);}
+
+let CARDS=[
+  {id:uid(),stage:0,v:'asis',ch:'alimtok',push:false,code:'K0400',label:'통합회원 전환 완료 안내',timing:'전환 즉시',trigger:'통합회원 전환 완료 시',offer:'LF Members 멤버십 혜택 안내',msg:'LF Members 통합회원 전환이 완료되었습니다.\n멤버십 혜택을 확인하고 즐거운 쇼핑하세요!'},
+  {id:uid(),stage:0,v:'asis',ch:'sms',push:false,code:'LL01',label:'웰컴 쿠폰 5종 안내',timing:'가입 D+1',trigger:'가입 후 1일',offer:'플러스쿠폰 5종 / 앱 다운로드 3,000M',msg:'(광고)[LFmall] #{고객명}님, LFmall 가입을 축하드립니다.\n신규가입 웰컴 선물이 도착했어요! [플러스쿠폰 5종] 지급 완료♥\n잠깐! 지금 LFmall 앱 다운로드 시 3,000 마일리지가 쏙!'},
+  {id:uid(),stage:0,v:'asis',ch:'sms',push:false,code:'LL02',label:'첫구매 5% 장바구니쿠폰',timing:'가입 D+3',trigger:'가입 후 3일 미구매',offer:'첫구매 시크릿 5% 장바구니쿠폰 (max 3만원, 7일)',msg:'(광고)[LFmall] #{고객명} 고객님, 시크릿 쿠폰이 도착했어요.\n단 7일의 혜택! 장바구니 통째로 할인♥'},
+  {id:uid(),stage:0,v:'asis',ch:'sms',push:false,code:'LL07',label:'첫구매 5% 쿠폰 (재발급)',timing:'가입 D+14',trigger:'가입 후 14일 미구매',offer:'첫구매 시크릿 5% 장바구니쿠폰 (max 3만원, 7일)',msg:'(광고)[LFmall] #{고객명} 고객님, 담아두신 그 상품 시크릿 쿠폰으로 최대할인♥'},
+  {id:uid(),stage:0,v:'asis',ch:'sms',push:false,code:'LL05',label:'100일 기념 쿠폰',timing:'가입 D+100',trigger:'가입 100일차',offer:'5,000원 장바구니쿠폰 (30일)',msg:'(광고)[LFmall] 우리.. 오늘 100일♥\n#{고객명}님과 LFmall이 만난 지 100일!\n시크릿 [5,000원 장바구니 쿠폰]을 선물 드려요.'},
+  {id:uid(),stage:0,v:'tobe',ch:'alimtok',push:false,code:'신규-001',label:'가입 즉시 웰컴 알림톡',timing:'가입 즉시',trigger:'가입 완료 즉시 (0분)',offer:'웰컴쿠폰팩(최대 128,000원) + 앱 설치 추가 20% 쿠폰',msg:'#{이름}님, LFmall 가족이 되신 것을 환영합니다! 🎉\n웰컴쿠폰팩(최대 128,000원)이 발급됐어요.',status:'new'},
+  {id:uid(),stage:0,v:'tobe',ch:'none',push:true,code:'신규-002',label:'2h 골든타임 PUSH (장바구니)',timing:'가입 +2h',trigger:'장바구니 이탈 감지 시',offer:'웰컴쿠폰 + 장바구니 상품 직링크',msg:'⚠ 아직 마치지 못한 #{상품명} 주문이 있어요!\n보유 쿠폰 혜택이 사라질 수도 있어요!',status:'new'},
+  {id:uid(),stage:0,v:'tobe',ch:'none',push:true,code:'신규-003',label:'2h 골든타임 PUSH (탐색이탈)',timing:'가입 +2h',trigger:'기획전·상품상세·검색 이탈 시',offer:'웰컴쿠폰 + 퍼널별 개인화 랜딩',msg:'📌 방금 보셨던 #{기획전명} 아직 진행 중이에요!\n웰컴쿠폰 적용하고 지금 바로 쇼핑해보세요 >',status:'new'},
+  {id:uid(),stage:0,v:'tobe',ch:'alimtok',push:false,code:'K0400',label:'통합회원 전환 완료 안내',timing:'전환 즉시',trigger:'통합회원 전환 완료 시',offer:'LF Members 멤버십 혜택 안내',msg:'LF Members 통합회원 전환이 완료되었습니다.',status:'kep'},
+  {id:uid(),stage:0,v:'tobe',ch:'sms',push:false,code:'LL01',label:'웰컴 쿠폰 안내 + 알림톡 병행',timing:'가입 D+1',trigger:'가입 D+1 미구매',offer:'웰컴혜택 재안내 + 앱 설치 마일리지',msg:'알림톡 채널 병행 추가 → 버튼형으로 쿠폰함·앱설치 딥링크 연결',status:'mod'},
+  {id:uid(),stage:0,v:'tobe',ch:'sms',push:false,code:'LL02',label:'첫구매 5% 장바구니쿠폰',timing:'가입 D+3',trigger:'가입 D+3 미구매',offer:'첫구매 시크릿 5% 쿠폰 (7일)',msg:'(유지) 시크릿 쿠폰이 도착했어요 / 단 7일의 혜택',status:'kep'},
+  {id:uid(),stage:0,v:'tobe',ch:'sms',push:false,code:'LL07',label:'첫구매 5% 쿠폰 (재발급)',timing:'가입 D+14',trigger:'가입 D+14 미구매',offer:'첫구매 시크릿 5% 쿠폰 (7일)',msg:'(유지) 담아두신 그 상품 / 시크릿 쿠폰으로 최대 할인',status:'kep'},
+  {id:uid(),stage:0,v:'tobe',ch:'sms',push:false,code:'LL05',label:'100일 기념 쿠폰',timing:'가입 D+100',trigger:'가입 100일차',offer:'5,000원 장바구니쿠폰 (30일)',msg:'(유지) LFmall과 만난 지 100일 / 시크릿 5,000원 쿠폰 선물',status:'kep'},
+  {id:uid(),stage:0,v:'tobe',ch:'sms',push:false,code:'신규-004',label:'앱 미설치 구매자 앱설치 유도',timing:'구매 D+1',trigger:'앱 미설치 구매 완료 후',offer:'앱 설치 유도 + 앱 전용 20% 쿠폰',msg:'앱에서 배송 현황 실시간 확인 + 앱 전용 20% 쿠폰! 지금 앱 설치하고 알림 받기 →',status:'new'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'O001',label:'장바구니 혜택가 알림',timing:'실시간',trigger:'장바구니 상품 5%↑ 할인 / 30일내 구매자 제외',offer:'할인율 직접 노출',msg:'(광고) ⭐ {ID}님 장바구니 상품! {DC_RATE}% 할인! ☘️ 놓치면 후회!'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'O002',label:'장바구니 품절 임박 알림',timing:'실시간',trigger:'재고 10개 미만 / 7일 내 동일 제외',offer:'희소성 소구',msg:'(광고) {ID}님 상품 품절 주의보⏳\n재고 소량 품절임박⚠️ 품절 전 선점하세요 ☛'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P003',label:'장바구니 상품 가격 인하',timing:'실시간',trigger:'장바구니 담은 상품 5%↑ 할인',offer:'가격 인하 직접 알림',msg:'(광고) ⚡ {DC_RATE}% 할인! ⚡ {ID}님 담아둔 이 상품 지금 사야 해요!'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P004',label:'찜 상품 가격 인하',timing:'실시간',trigger:'최근 1주 내 찜 상품 5%↑',offer:'가격 인하 + 희소성',msg:'(광고) 내가 찜❤️했던 상품이 {DC_RATE}% 할인!?'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P005',label:'최근 본 상품 가격 인하',timing:'실시간',trigger:'최근 1주 내 조회 상품 5%↑',offer:'관심 상품 가격 인하',msg:'(광고) ⭐ {ID}님 관심 상품! {DC_RATE}% 할인!'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P006',label:'예약판매 입고 안내',timing:'실시간',trigger:'당일 예약판매 종료',offer:'즉시 배송 가능 알림',msg:'(광고) ☕ 예약판매 상품이 입고 됐어요! 지금 주문하면 바로 배송 ✨'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P007',label:'입점 상품 가격 인하',timing:'실시간',trigger:'최근 본 입점 상품 추가 할인',offer:'추가 할인 기회',msg:'(광고) ⭐추가 할인 시작! 최근에 보신 상품! 득템 할 기회예요 ☘️'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P_BR',label:'기획전-브랜드 매칭',timing:'실시간',trigger:'조회·담은 브랜드 기획전 매칭',offer:'관심 브랜드 기획전 연결',msg:'(광고) 혜택 모아모아 [브랜드] 기획전에서 바로 득템 찬스!'},
+  {id:uid(),stage:1,v:'asis',ch:'none',push:true,code:'P_CA',label:'기획전-카테고리 매칭',timing:'실시간',trigger:'조회 카테고리 기획전 매칭',offer:'관심 카테고리 기획전 연결',msg:'(광고) 혜택 모아모아 [카테고리] 기획전에서 바로 득템 찬스!'},
+  {id:uid(),stage:1,v:'asis',ch:'alimtok',push:false,code:'K0279',label:'LIVE 방송 예정 알림',timing:'방송 20분 전',trigger:'알림 신청자 대상',offer:'LIVE 방송 사전 알림',msg:'알림 신청하신 LF LIVE가 곧 시작됩니다.\n▶ 방송명/혜택/방송시간 안내'},
+  {id:uid(),stage:1,v:'asis',ch:'alimtok',push:false,code:'K0280',label:'LIVE 방송 시작 알림',timing:'방송 시작 즉시',trigger:'알림 신청자 대상',offer:'LIVE 방송 시작 알림',msg:'알림 신청하신 LF LIVE가 지금 시작합니다.\n▶ 지금 바로 입장하기'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'신규-101',label:'주문서 이탈 PUSH 1h',timing:'이탈 +1h',trigger:'결제창 진입 후 미결제 1h 경과',offer:'장바구니 직링크 + 쿠폰 잔여 알림',msg:'⚠ 아직 마치지 못한 #{상품명} 주문이 있어요!\n보유 쿠폰 혜택이 사라질 수도 있어요!',status:'new'},
+  {id:uid(),stage:1,v:'tobe',ch:'sms',push:false,code:'신규-102',label:'주문서 이탈 D+1 LMS',timing:'이탈 D+1',trigger:'결제창 진입 후 미결제 24h 경과',offer:'할인쿠폰 적용 안내 + 주문 완료 유도',msg:'놓치고 계신 할인쿠폰이 있어요!\n주문 중이던 #{상품명}… 지금 쿠폰 적용하고 완료하세요!',status:'new'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'O001',label:'장바구니 혜택가 알림',timing:'실시간',trigger:'장바구니 상품 5%↑ 할인',offer:'할인율 직접 노출',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'O002',label:'장바구니 품절 임박 알림',timing:'실시간',trigger:'재고 10개 미만',offer:'희소성 소구',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'P003~P007',label:'가격 인하 PUSH 4종',timing:'실시간',trigger:'장바구니·찜·최근본·입점 가격 인하',offer:'관심 상품 가격 인하 알림',msg:'(유지) 관심 상품 {DC_RATE}% 할인!',status:'kep'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'P_BR/CA',label:'기획전 브랜드·카테고리',timing:'실시간',trigger:'관심 브랜드/카테고리 기획전 매칭',offer:'기획전 연결',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:1,v:'tobe',ch:'alimtok',push:false,code:'K027X',label:'LIVE 방송 알림 개선',timing:'방송 전',trigger:'알림 신청자 대상',offer:'LIVE 방송 사전·시작 알림',msg:'대기 → 운영 전환. K0279/K0280 알림톡 버튼형으로 개선.',status:'mod'},
+  {id:uid(),stage:1,v:'tobe',ch:'none',push:true,code:'예정',label:'검색 이탈 리타겟팅',timing:'이탈 +2~4h',trigger:'검색 후 미구매 이탈',offer:'검색어 기반 추천 상품',msg:'🔎 방금 찾으신 "#{검색어}" 관련 상품이에요!\n할인 적용된 지금 바로 확인해보세요 >',status:'new'},
+  {id:uid(),stage:2,v:'asis',ch:'sms',push:false,code:'LL45',label:'배송완료 감사 쿠폰',timing:'배송완료 당일',trigger:'첫 구매 배송 완료 후',offer:'첫구매 감사 10,000원 플러스쿠폰 (30일)',msg:'(광고)[LFmall] #{고객명} 고객님, 상품은 잘 받아보셨나요?\n첫 구매 감사 쿠폰 드려요! ♥'},
+  {id:uid(),stage:2,v:'asis',ch:'sms',push:false,code:'LL11',label:'재구매 6% 쿠폰',timing:'구매 D+7',trigger:'1회 구매 후 7일',offer:'재구매 시크릿 6% 장바구니쿠폰 (7일)',msg:'(광고)[LFmall] 첫 구매 한 #{고객명}님, 시크릿 혜택 팡!♥\n[장바구니 6% 쿠폰]이 발급되었습니다.'},
+  {id:uid(),stage:2,v:'asis',ch:'sms',push:false,code:'LL12',label:'쿠폰 소멸 리마인드',timing:'구매 D+12',trigger:'기발급 쿠폰 소멸 D-3',offer:'기발급 쿠폰 소멸 전 리마인드',msg:'(광고)[LFmall] #{고객명} 고객님, 딱! 한번 발급되는 구매 감사 쿠폰이 소멸 예정입니다.'},
+  {id:uid(),stage:2,v:'asis',ch:'sms',push:false,code:'LL15',label:'시크릿 6% 쿠폰 재발급',timing:'구매 D+15',trigger:'1회 구매 후 15일 미구매',offer:'시크릿 6% 장바구니쿠폰 8만원↑ (7일)',msg:'(광고)[LFmall] 이 문자는 놓치면 후회해요!\n#{고객명}님만을 위한 쿠폰이 도착했습니다.'},
+  {id:uid(),stage:2,v:'tobe',ch:'sms',push:false,code:'LL45',label:'배송완료 감사 + 알림톡 병행',timing:'배송완료 당일',trigger:'첫 구매 배송 완료',offer:'첫구매 감사 10,000원 쿠폰 (30일)',msg:'알림톡 채널 병행 추가 → 이미지+버튼형으로 쿠폰함 딥링크 연결',status:'mod'},
+  {id:uid(),stage:2,v:'tobe',ch:'alimtok',push:false,code:'신규-201',label:'배송완료 D+1~3 리뷰+쿠폰',timing:'배송완료 D+1~3',trigger:'배송완료 후 리뷰 미작성',offer:'리뷰 작성 시 500P + 재구매 쿠폰 10% (14일)',msg:'#{상품명} 잘 받아보셨나요? 😊\n리뷰 작성 시 500P + 재구매 쿠폰 10%(14일) 발급!',status:'new'},
+  {id:uid(),stage:2,v:'tobe',ch:'friends',push:false,code:'신규-202',label:'배송완료 D+7 스타일링 콘텐츠',timing:'배송완료 D+7',trigger:'배송완료 후 7일',offer:'활용팁·스타일링 콘텐츠',msg:'구매하신 #{상품명} 잘 활용하고 계신가요?\n소재에 맞는 세탁·보관법 안내드려요 →',status:'new'},
+  {id:uid(),stage:2,v:'tobe',ch:'sms',push:false,code:'LL11',label:'재구매 6% 쿠폰 + 알림톡 병행',timing:'구매 D+7',trigger:'1회 구매 후 7일',offer:'재구매 시크릿 6% 장바구니쿠폰 (7일)',msg:'알림톡 채널 추가 + 개인화 추천 버튼 → 쿠폰함 바로가기',status:'mod'},
+  {id:uid(),stage:2,v:'tobe',ch:'sms',push:false,code:'LL12',label:'쿠폰 리마인드 (삭제 검토)',timing:'구매 D+12',trigger:'기발급 쿠폰 소멸 리마인드',offer:'CTR·CR 실측 후 효과 낮으면 폐지',msg:'CTR·CR 실측 결과에 따라 폐지 또는 알림톡 전환 검토.',status:'del'},
+  {id:uid(),stage:2,v:'tobe',ch:'sms',push:false,code:'LL15',label:'시크릿 6% 쿠폰 재발급',timing:'구매 D+15',trigger:'1회 구매 후 15일 미구매',offer:'시크릿 6% 장바구니쿠폰 8만원↑ (7일)',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:3,v:'asis',ch:'sms',push:false,code:'LL13',label:'2회 감사 6% 쿠폰',timing:'2회구매 D+7',trigger:'2회 구매 후 7일',offer:'재구매 시크릿 6% 장바구니쿠폰 (7일)',msg:'(광고)[LFmall] #{고객명}님, 두 번째 구매 감사합니다.\n시크릿 쿠폰 팡!♥'},
+  {id:uid(),stage:3,v:'asis',ch:'sms',push:false,code:'LL17',label:'쿠폰 소멸 리마인드',timing:'2회구매 D+12',trigger:'기발급 쿠폰 소멸 D-3',offer:'기발급 쿠폰 소멸 리마인드',msg:'(광고)[LFmall] 앗, #{고객명}님 고객님의 구매 감사 쿠폰이 소멸 예정입니다.'},
+  {id:uid(),stage:3,v:'asis',ch:'sms',push:false,code:'LL14',label:'시크릿 6% 쿠폰 재발급',timing:'2회구매 D+15',trigger:'2회 구매 후 15일 미구매',offer:'시크릿 6% 장바구니쿠폰 8만원↑ (7일)',msg:'(광고)[LFmall] 쉿, 이 문자는 놓치면 후회해요!'},
+  {id:uid(),stage:3,v:'asis',ch:'sms',push:false,code:'LL18',label:'쿠폰 D+21 리마인드',timing:'2회구매 D+21',trigger:'2회 구매 후 21일',offer:'기발급 쿠폰 소멸 리마인드 (최후)',msg:'(광고)[LFmall] 앗, #{고객명} 고객님의 구매 감사 쿠폰이 소멸 예정입니다.'},
+  {id:uid(),stage:3,v:'tobe',ch:'email',push:false,code:'신규-301',label:'2회 구매 직후 등급 넛지',timing:'2회구매 즉시',trigger:'2회 구매 완료 직후',offer:'다음 등급까지 잔여 금액 실시간 안내',msg:'벌써 2번째 구매 감사합니다 🎉\nPurple까지 OO만원 남았어요 👉',status:'new'},
+  {id:uid(),stage:3,v:'tobe',ch:'sms',push:false,code:'LL13',label:'2회 감사 6% 쿠폰',timing:'2회구매 D+7',trigger:'2회 구매 후 7일',offer:'재구매 시크릿 6% 쿠폰 (7일)',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:3,v:'tobe',ch:'sms',push:false,code:'LL17',label:'쿠폰 리마인드 (삭제 검토)',timing:'2회구매 D+12',trigger:'기발급 쿠폰 소멸 리마인드',offer:'CTR·CR 실측 후 효과 낮으면 폐지',msg:'CTR·CR 실측 결과에 따라 폐지 검토.',status:'del'},
+  {id:uid(),stage:3,v:'tobe',ch:'sms',push:false,code:'LL14',label:'시크릿 6% 쿠폰 재발급',timing:'2회구매 D+15',trigger:'2회 구매 후 15일 미구매',offer:'시크릿 6% 장바구니쿠폰 8만원↑ (7일)',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:3,v:'tobe',ch:'sms',push:false,code:'LL18',label:'D+21 리마인드 (삭제 검토)',timing:'2회구매 D+21',trigger:'2회 구매 후 21일',offer:'월평균 948명, 실효성 점검 필요',msg:'CTR·CR 실측 결과에 따라 폐지 검토.',status:'del'},
+  {id:uid(),stage:3,v:'tobe',ch:'none',push:true,code:'신규-302',label:'D+14 개인화 추천 PUSH',timing:'2회구매 D+14',trigger:'2회 구매 후 14일 미구매',offer:'구매 이력 기반 1:1 개인화 추천',msg:'#{이름}님이 좋아하는 스타일의 신상이 도착했어요 👗',status:'new'},
+  {id:uid(),stage:4,v:'asis',ch:'sms',push:false,code:'EV21',label:'승급 유도 안내',timing:'매월 23일',trigger:'BK/SV 등급 가망 고객',offer:'등급 상승 잔여 금액 안내',msg:'(문구 미등록 — 담당자 확인 필요)\n핵심 소구: 등급 기회를 놓치지 마세요'},
+  {id:uid(),stage:4,v:'asis',ch:'sms',push:false,code:'EV25',label:'멤버십 쿠폰 미사용 알림',timing:'매월 28일',trigger:'VIP 멤버십 쿠폰 미사용 고객',offer:'VIP 멤버십 쿠폰 소멸 전 사용 유도',msg:'(광고)[LFmall] #{고객명}님이 쇼핑백에 넣어두신 상품에 적용 가능한 멤버십 쿠폰이 아직 남아있어요!'},
+  {id:uid(),stage:4,v:'asis',ch:'sms',push:false,code:'EV00',label:'30일 미방문 복귀 유도',timing:'미방문 D+30',trigger:'최근 30일↑ 미방문 + 6개월내 2회↑ 구매',offer:'개인화 추천 업데이트 + 보유 혜택 확인',msg:'(광고)[LFmall] #{고객명}님, 방문이 뜸하신 동안 취향에 맞는 상품들이 새로 업데이트 되었어요!'},
+  {id:uid(),stage:4,v:'tobe',ch:'alimtok',push:false,code:'신규-401',label:'3회 구매 → VIP 이관 알림톡',timing:'3회구매 즉시',trigger:'3회 구매 달성 시',offer:'LF Members Black/Purple 혜택 안내',msg:'#{이름}님이 드디어 VIP 등급에 도달했어요! 🌟\nLF Members Black/Purple 혜택 확인하세요.',status:'new'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'EV21',label:'승급 유도 안내',timing:'매월 23일',trigger:'승급 가망 고객',offer:'등급 상승 잔여 금액 안내',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'EV25',label:'멤버십 쿠폰 미사용 알림',timing:'매월 28일',trigger:'VIP 멤버십 쿠폰 미사용',offer:'VIP 멤버십 쿠폰 소멸 전 사용 유도',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'EV00',label:'30일 미방문 복귀 유도',timing:'미방문 D+30',trigger:'VIP 30일↑ 미방문',offer:'개인화 추천 + 보유 혜택 확인',msg:'(유지)',status:'kep'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'신규-402',label:'Win-back 90일 (1차)',timing:'미방문 D+90',trigger:'일반 고객 90일↑ 미방문',offer:'무료배송 쿠폰 7일',msg:'#{이름}님, 오랜만이에요 😢\n오늘 돌아오시면 7일 무료배송 쿠폰을 드려요.',status:'new'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'신규-403',label:'Win-back 180일 (2차)',timing:'미방문 D+180',trigger:'일반 고객 180일↑ 미방문',offer:'10% 할인쿠폰 7일',msg:'#{이름}님이 보고 싶어요!\n특별히 10% 쿠폰 준비했어요 → 지금 쇼핑하기',status:'new'},
+  {id:uid(),stage:4,v:'tobe',ch:'sms',push:false,code:'신규-404',label:'Win-back 270일 (3차)',timing:'미방문 D+270',trigger:'일반 고객 270일↑ 미방문',offer:'15% 할인쿠폰 7일 (최후 수단)',msg:'마지막으로 한 번만 더 만나고 싶어요 💌\n15% 쿠폰 드릴게요. 기한은 7일!',status:'new'},
+];
+
+// ── localStorage ──
+function loadData(){
+  try{
+    const raw=localStorage.getItem(STORE_KEY);
+    if(!raw)return;
+    const d=JSON.parse(raw);
+    if(d._uid)_uid=d._uid;
+    if(Array.isArray(d.cards))CARDS=d.cards;
+    if(Array.isArray(d.stages)){
+      d.stages.forEach(s=>{
+        const t=STAGES.find(x=>x.id===s.id);
+        if(t){if(s.color)t.color=s.color;if(s.label)t.label=s.label;if(s.gap)t.gap=s.gap;if(s.mosu)t.mosu=s.mosu;}
+      });
+    }
+  }catch(e){console.warn('load failed',e);}
+}
+
+let _saveTimer=null;
+function saveData(){
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>{
+    try{
+      localStorage.setItem(STORE_KEY,JSON.stringify({cards:CARDS,stages:STAGES,_uid,ts:Date.now()}));
+      const el=document.getElementById('tbSaved');
+      el.classList.add('show');
+      setTimeout(()=>el.classList.remove('show'),2200);
+    }catch(e){}
+  },400);
+}
+
+function exportJSON(){
+  const blob=new Blob([JSON.stringify({cards:CARDS,stages:STAGES,_uid,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='lfmall-crm-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();
+}
+function importJSON(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    try{
+      const d=JSON.parse(ev.target.result);
+      if(Array.isArray(d.cards))CARDS=d.cards;
+      if(Array.isArray(d.stages))d.stages.forEach(s=>{const t=STAGES.find(x=>x.id===s.id);if(t)Object.assign(t,s);});
+      if(d._uid)_uid=d._uid;
+      ensureOrder();renderSidebar();render();saveData();
+      alert('데이터를 성공적으로 불러왔습니다.');
+    }catch(ex){alert('JSON 파일을 읽을 수 없습니다.');}
+  };
+  r.readAsText(f);
+  e.target.value='';
+}
+
+// ── Inline editing ──
+function editStageLabel(id,e){
+  e.stopPropagation();
+  const el=document.getElementById('slabel-'+id);if(!el)return;
+  const stage=STAGES.find(s=>s.id===id);if(!stage)return;
+  const inp=document.createElement('input');
+  inp.type='text';inp.value=stage.label;inp.className='stage-head-label-input';
+  el.replaceWith(inp);inp.focus();inp.select();
+  function save(){stage.label=inp.value.trim()||stage.label;renderSidebar();render();saveData();}
+  inp.addEventListener('blur',save);
+  inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();save();}if(ev.key==='Escape')render();});
+}
+function editStageMosu(id,e){
+  e.stopPropagation();
+  const el=document.getElementById('smosu-'+id);if(!el)return;
+  const stage=STAGES.find(s=>s.id===id);if(!stage)return;
+  const inp=document.createElement('input');
+  inp.type='text';inp.value=stage.mosu;inp.className='stage-head-mosu-input';
+  el.replaceWith(inp);inp.focus();inp.select();
+  function save(){stage.mosu=inp.value.trim()||stage.mosu;render();saveData();}
+  inp.addEventListener('blur',save);
+  inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();save();}if(ev.key==='Escape')render();});
+}
+function editGapText(id,e){
+  e.stopPropagation();
+  const el=document.getElementById('gaptext-'+id);if(!el)return;
+  const stage=STAGES.find(s=>s.id===id);if(!stage)return;
+  const inp=document.createElement('input');
+  inp.type='text';inp.value=stage.gap;inp.className='gap-text-input';
+  el.replaceWith(inp);inp.focus();
+  function save(){stage.gap=inp.value.trim()||stage.gap;render();saveData();}
+  inp.addEventListener('blur',save);
+  inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();save();}if(ev.key==='Escape')render();});
+}
+
+// ── Color picker ──
+let _cpStageId=null;
+const cp=document.getElementById('stageColorPicker');
+function openColorPicker(id,e){
+  e.stopPropagation();
+  const stage=STAGES.find(s=>s.id===id);if(!stage)return;
+  _cpStageId=id;
+  cp.value=stage.color;
+  cp.style.left=e.clientX+'px';cp.style.top=e.clientY+'px';
+  cp.style.pointerEvents='auto';
+  cp.click();
+}
+cp.addEventListener('change',function(){
+  const stage=STAGES.find(s=>s.id===_cpStageId);
+  if(stage){stage.color=this.value;renderSidebar();render();saveData();}
+  this.style.pointerEvents='none';
+});
+
+// ── Timing sort ──
+// 발송 타이밍 문자열을 정렬용 상대 시점(일 단위)으로 환산.
+// 실시간 < 방송예고 < 즉시 < N시간 < D+N < 배송완료 < N일 순.
+function timingNum(t){
+  if(!t)return 999;
+  const s=t.toLowerCase();
+  if(s.includes('실시간'))return -1;
+  if(s.includes('방송')&&s.includes('전'))return -0.5;
+  if(s.includes('즉시'))return 0;
+  const hm=s.match(/(\d+)\s*(?:시간|h)/);if(hm)return parseInt(hm[1])/24;   // "가입 +2h", "이탈 +1h"
+  const dm=s.match(/d\s*\+\s*(\d+)/i);if(dm)return parseFloat(dm[1]);        // "가입 D+1", "미방문 D+90"
+  if(s.includes('배송완료'))return 0.1;                                      // "배송완료 당일"
+  const dom=s.match(/(\d+)\s*일/);if(dom)return parseInt(dom[1]);            // "매월 23일"
+  if(s.includes('매일'))return 30;
+  return 999;
+}
+
+// ── Ordering (drag & drop friendly) ──
+// Cards sort by explicit `ord`; on first load `ord` is seeded from timing order
+// so the initial view stays time-sorted, but drag-drop can override freely.
+function ordOf(c){return (typeof c.ord==='number')?c.ord:timingNum(c.timing)*1000;}
+function ensureOrder(){
+  STAGES.forEach(s=>['asis','tobe'].forEach(v=>{
+    const grp=CARDS.filter(c=>c.stage===s.id&&c.v===v);
+    if(grp.some(c=>typeof c.ord!=='number')){
+      grp.sort((a,b)=>timingNum(a.timing)-timingNum(b.timing)).forEach((c,i)=>c.ord=i*10);
+    }
+  }));
+}
+
+// ── Render ──
+// 사용자 편집 값이 innerHTML로 들어가므로 HTML 특수문자를 항상 이스케이프한다.
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,m=>(
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
+  ));
+}
+// 카드가 현재 카드 단위 필터(채널·상태·PUSH·검색)를 통과하는지
+function cardMatches(c){
+  if(FILTERS.channels.size&&!FILTERS.channels.has(c.ch))return false;
+  if(FILTERS.pushOnly&&!c.push)return false;
+  if(FILTERS.statuses.size&&(!c.status||!FILTERS.statuses.has(c.status)))return false;
+  if(FILTERS.search){
+    const q=FILTERS.search.toLowerCase();
+    const hay=[c.code,c.label,c.timing,c.trigger,c.offer,c.msg].join(' ').toLowerCase();
+    if(!hay.includes(q))return false;
+  }
+  return true;
+}
+// 단계/보기 필터까지 반영한 표시 대상 카드 수
+function visibleCount(){
+  return CARDS.filter(c=>{
+    if(FILTERS.stages.size&&!FILTERS.stages.has(String(c.stage)))return false;
+    if(FILTERS.views.size&&!FILTERS.views.has(c.v))return false;
+    return cardMatches(c);
+  }).length;
+}
+
+function render(){
+  const html=STAGES.map(renderStage).join('');
+  document.getElementById('content').innerHTML=html.trim()
+    ?html
+    :`<div class="empty-state">조건에 맞는 캠페인이 없습니다.<br><button class="btn btn-ghost" onclick="resetFilters()">필터 초기화</button></div>`;
+  const fc=document.getElementById('fcount');
+  if(fc)fc.textContent=`표시 ${visibleCount()}건 / 전체 ${CARDS.length}건`;
+  refreshIcons();
+}
+
+function renderStage(stage){
+  if(FILTERS.stages.size&&!FILTERS.stages.has(String(stage.id)))return '';
+  const anyCardFilter=FILTERS.channels.size||FILTERS.statuses.size||FILTERS.pushOnly||!!FILTERS.search;
+  const asis=CARDS.filter(c=>c.stage===stage.id&&c.v==='asis'&&cardMatches(c)).sort((a,b)=>ordOf(a)-ordOf(b));
+  const tobe=CARDS.filter(c=>c.stage===stage.id&&c.v==='tobe'&&cardMatches(c)).sort((a,b)=>ordOf(a)-ordOf(b));
+  const showAsis=(!FILTERS.views.size||FILTERS.views.has('asis'))&&(asis.length>0||!anyCardFilter);
+  const showTobe=(!FILTERS.views.size||FILTERS.views.has('tobe'))&&(tobe.length>0||!anyCardFilter);
+  if(!showAsis&&!showTobe)return '';
+  const cnt={new:0,mod:0,kep:0,del:0};
+  tobe.forEach(c=>{if(c.status&&cnt[c.status]!==undefined)cnt[c.status]++;});
+  const stCounts=['new','mod','kep','del'].map(k=>cnt[k]>0
+    ?`<span class="row-count" style="background:${ST[k].bg};color:${ST[k].c};border-color:${ST[k].b}">${ST[k].label} ${cnt[k]}</span>`
+    :'').join('');
+  const c30=stage.color+'30',c50=stage.color+'50';
+  const asisRow=showAsis?`<div class="view-row">
+      <div class="row-meta">
+        <span class="row-label" style="color:#9A9890">AS-IS</span>
+        <span class="row-count" style="background:#EDEEF4;color:#9A9890;border-color:#DDE0EA">${asis.length}건</span>
+      </div>
+      <div class="cards-scroll" data-stage="${stage.id}" data-view="asis" ondragover="dragOverRow(event)" ondragleave="dragLeaveRow(event)" ondrop="dropOnRow(event)">${asis.map(c=>cardHTML(c)).join('')}<button class="add-btn" onclick="openAdd('asis',${stage.id})">+</button></div>
+    </div>`:'';
+  const tobeRow=showTobe?`<div class="view-row tobe">
+      <div class="row-meta">
+        <span class="row-label" style="color:${stage.color}">TO-BE</span>
+        <span class="row-count" style="background:${c30};color:${stage.color};border-color:${c50}">${tobe.length}건</span>
+        ${stCounts}
+      </div>
+      <div class="cards-scroll" data-stage="${stage.id}" data-view="tobe" ondragover="dragOverRow(event)" ondragleave="dragLeaveRow(event)" ondrop="dropOnRow(event)">${tobe.map(c=>cardHTML(c)).join('')}<button class="add-btn" onclick="openAdd('tobe',${stage.id})">+</button></div>
+    </div>`:'';
+  const divider=(showAsis&&showTobe)?'<div class="mid-divider"></div>':'';
+  return `<div class="stage-section">
+    <div class="stage-head" style="background:${stage.color}">
+      <div class="stage-head-label" id="slabel-${stage.id}" onclick="editStageLabel(${stage.id},event)" title="클릭하여 편집">${esc(stage.label)}</div>
+      <span class="stage-head-mosu" id="smosu-${stage.id}" onclick="editStageMosu(${stage.id},event)" title="클릭하여 편집">${esc(stage.mosu)}</span>
+      <button class="stage-color-btn" onclick="openColorPicker(${stage.id},event)" title="헤더 색상 변경">🎨</button>
+    </div>
+    <div class="gap-row">
+      <span class="gap-icon">⚠</span>
+      <span class="gap-text" id="gaptext-${stage.id}" onclick="editGapText(${stage.id},event)" title="클릭하여 편집">${esc(stage.gap)}</span>
+    </div>
+    ${asisRow}${divider}${tobeRow}
+  </div>`;
+}
+
+// ── Sidebar (필터 패널) ──
+function renderSidebar(){
+  const chip=(key,val,label,color,showDot)=>{
+    const on=FILTERS[key].has(val);
+    const style=on?` style="border-color:${color};background:${color}1A;color:${color}"`:'';
+    const dot=showDot?`<span class="fdot" style="background:${color}"></span>`:'';
+    return `<button class="fchip${on?' on':''}" onclick="toggleSetFilter('${key}','${val}')"${style}>${dot}${esc(label)}</button>`;
+  };
+  const sec=(t,inner)=>`<div class="fsec"><div class="fsec-t">${t}</div><div class="fchips">${inner}</div></div>`;
+  const pushOn=FILTERS.pushOnly;
+  document.getElementById('sideBody').innerHTML=
+    `<input id="filterSearch" class="fsearch" type="text" placeholder="🔍 검색 (이름·코드·문구)" value="${esc(FILTERS.search)}" oninput="onSearch(this.value)">`
+    +sec('보기', [['asis','AS-IS'],['tobe','TO-BE']].map(([k,l])=>chip('views',k,l,'#7B6BC8',false)).join(''))
+    +sec('발송 채널', Object.keys(CH).map(k=>chip('channels',k,CH[k].label,CH[k].c,true)).join(''))
+    +sec('변경 유형', Object.keys(ST).map(k=>chip('statuses',k,ST[k].label,ST[k].c,false)).join(''))
+    +sec('고객 여정 단계', STAGES.map(s=>chip('stages',String(s.id),s.label,s.color,true)).join(''))
+    +sec('기타', `<button class="fchip${pushOn?' on':''}" onclick="togglePush()"${pushOn?' style="border-color:#3A3E46;background:#3A3E461A;color:#3A3E46"':''}>${licon('bell')} PUSH 발송만</button>`)
+    +`<div class="fcount" id="fcount"></div>`;
+  refreshIcons();
+}
+function toggleSetFilter(key,val){
+  const set=FILTERS[key];
+  set.has(val)?set.delete(val):set.add(val);
+  renderSidebar();render();
+}
+function togglePush(){FILTERS.pushOnly=!FILTERS.pushOnly;renderSidebar();render();}
+function onSearch(v){FILTERS.search=v;render();}
+function resetFilters(){
+  FILTERS={search:'',channels:new Set(),statuses:new Set(),views:new Set(),stages:new Set(),pushOnly:false};
+  renderSidebar();render();
+}
+function toggleSidebar(){document.body.classList.toggle('sidebar-collapsed');}
+
+function cardHTML(c){
+  const ch=CH[c.ch]||CH.sms;
+  const st=c.status?ST[c.status]:null;
+  const stBadge=st
+    ?`<span class="status-badge" style="background:${st.bg};color:${st.c};border-color:${st.b}" onclick="cycleStatus('${c.id}',event)">${st.label}</span>`
+    :'';
+  return `<div class="card" draggable="true" style="border-left-color:${ch.c}" onclick="openDet('${c.id}')"
+    ondragstart="dragStart(event,'${c.id}')" ondragend="dragEnd(event)"
+    ondragover="dragOverCard(event)" ondragleave="dragLeaveCard(event)" ondrop="dropOnCard(event,'${c.id}')">
+    <div class="card-badges">
+      ${c.push?`<span class="push-badge">${licon('bell')} PUSH</span>`:''}
+      <span class="ch-badge" style="background:${ch.bg};color:${ch.c};border-color:${ch.c}30">${licon(ch.lucide)} ${ch.label}</span>
+      ${stBadge}
+    </div>
+    <div class="card-code"><span>${esc(c.code)}</span>
+      <span class="card-actions">
+        <button class="act-btn" onclick="openEdit('${c.id}',event)" title="편집">✏</button>
+        <button class="act-btn act-del" onclick="delCard('${c.id}',event)" title="삭제">×</button>
+      </span>
+    </div>
+    <div class="card-label">${esc(c.label)}</div>
+    <div class="card-timing">⏱ ${esc(c.timing)}</div>
+  </div>`;
+}
+
+// ── Detail panel ──
+function openDet(id){
+  const c=CARDS.find(x=>x.id===id);if(!c)return;
+  const ch=CH[c.ch]||CH.sms;
+  const st=c.status?ST[c.status]:null;
+  const stBadge=st
+    ?`<span class="status-badge" style="background:${st.bg};color:${st.c};border-color:${st.b}">${st.label}</span>`
+    :'<span style="font-size:10px;color:#9A9890">AS-IS 운영중</span>';
+  document.getElementById('detContent').innerHTML=`
+    <div class="det-head">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        ${c.push?`<span class="push-badge">${licon('bell')} PUSH</span>`:''}
+        <span style="width:8px;height:8px;border-radius:50%;background:${ch.c};display:inline-block"></span>
+        <span class="det-ch" style="font-family:'DM Mono',monospace;font-size:9px;color:${ch.c};text-transform:uppercase;letter-spacing:.1em">${licon(ch.lucide)} ${ch.label}</span>
+      </div>
+      <div class="det-code">${esc(c.code)}</div>
+      <div class="det-title">${esc(c.label)}</div>
+      <div style="display:flex;gap:6px">${stBadge}</div>
+    </div>
+    <div class="det-body">
+      <div class="det-lbl">⏱ 발송 타이밍</div><div class="det-val">${esc(c.timing)}</div>
+      <div class="det-lbl">🎯 트리거 조건</div><div class="det-val">${esc(c.trigger||'—')}</div>
+      <div class="det-lbl">🎁 오퍼 / 혜택</div><div class="det-val hl">${esc(c.offer||'—')}</div>
+      <div class="det-lbl">💬 메시지 / 문구</div><div class="det-val">${esc(c.msg||'—').replace(/\n/g,'<br>')}</div>
+    </div>
+    <div class="det-foot">
+      <button class="btn btn-primary" onclick="openEdit('${c.id}')">✏ 편집</button>
+      <button class="btn btn-ghost" onclick="delCard('${c.id}')">삭제</button>
+    </div>`;
+  document.getElementById('detPanel').classList.add('on');
+  document.getElementById('detOv').classList.add('on');
+  refreshIcons();
+}
+function closeDet(){
+  document.getElementById('detPanel').classList.remove('on');
+  document.getElementById('detOv').classList.remove('on');
+}
+
+// ── Status cycle ──
+function cycleStatus(id,e){
+  e&&e.stopPropagation();
+  const c=CARDS.find(x=>x.id===id);if(!c||!c.status)return;
+  c.status=ST_ORDER[(ST_ORDER.indexOf(c.status)+1)%ST_ORDER.length];
+  render();saveData();
+}
+
+// ── Drag & Drop ──
+let _dragId=null;
+function dragStart(e,id){
+  _dragId=id;
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',id);}catch(_){}
+  e.currentTarget.classList.add('dragging');
+}
+function dragEnd(){
+  _dragId=null;
+  document.querySelectorAll('.card.dragging').forEach(c=>c.classList.remove('dragging'));
+  document.querySelectorAll('.card.drop-before,.card.drop-after').forEach(c=>c.classList.remove('drop-before','drop-after'));
+  document.querySelectorAll('.cards-scroll.drop-hot').forEach(c=>c.classList.remove('drop-hot'));
+}
+function dragOverCard(e){
+  if(!_dragId)return;
+  e.preventDefault();e.stopPropagation();
+  e.dataTransfer.dropEffect='move';
+  const card=e.currentTarget;
+  const rect=card.getBoundingClientRect();
+  const after=(e.clientX-rect.left)>rect.width/2;
+  card.classList.toggle('drop-after',after);
+  card.classList.toggle('drop-before',!after);
+}
+function dragLeaveCard(e){e.currentTarget.classList.remove('drop-before','drop-after');}
+function dropOnCard(e,targetId){
+  if(!_dragId)return;
+  e.preventDefault();e.stopPropagation();
+  const card=e.currentTarget;
+  const rect=card.getBoundingClientRect();
+  const after=(e.clientX-rect.left)>rect.width/2;
+  card.classList.remove('drop-before','drop-after');
+  if(_dragId===targetId)return;
+  const t=CARDS.find(c=>c.id===targetId);if(!t)return;
+  moveCard(_dragId,t.stage,t.v,targetId,after);
+}
+function dragOverRow(e){
+  if(!_dragId)return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  e.currentTarget.classList.add('drop-hot');
+}
+function dragLeaveRow(e){
+  if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.classList.remove('drop-hot');
+}
+function dropOnRow(e){
+  if(!_dragId)return;
+  e.preventDefault();
+  const row=e.currentTarget;row.classList.remove('drop-hot');
+  moveCard(_dragId,parseInt(row.dataset.stage),row.dataset.view,null,true);
+}
+function moveCard(dragId,stage,view,beforeAfterId,after){
+  const c=CARDS.find(x=>x.id===dragId);if(!c)return;
+  const changedView=(c.v!==view);
+  c.stage=stage;c.v=view;
+  if(changedView){
+    if(view==='tobe'&&!c.status)c.status='kep';   // 신규 TO-BE 칸으로 옮기면 기본 '유지'
+    if(view==='asis')delete c.status;             // AS-IS 칸은 상태 뱃지 없음
+  }
+  let group=CARDS.filter(x=>x.stage===stage&&x.v===view&&x.id!==dragId).sort((a,b)=>ordOf(a)-ordOf(b));
+  let idx=group.length;
+  if(beforeAfterId){
+    const ti=group.findIndex(x=>x.id===beforeAfterId);
+    if(ti>=0)idx=after?ti+1:ti;
+  }
+  group.splice(idx,0,c);
+  group.forEach((g,i)=>g.ord=i*10);
+  render();saveData();
+}
+
+// ── Modal ──
+let _editId=null,_editView=null,_editStage=null,_curStatus='new';
+function openAdd(view,stage){
+  _editId=null;_editView=view;_editStage=stage;_curStatus='new';
+  document.getElementById('modalTitle').textContent='캠페인 추가';
+  ['fCode','fLabel','fTiming','fTrigger','fOffer','fMessage'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('fCh').value='sms';
+  document.getElementById('fPush').checked=false;
+  document.getElementById('fStatusRow').style.display=view==='tobe'?'':'none';
+  hlStatus('new');
+  document.getElementById('modalOv').classList.add('on');
+}
+function openEdit(id,e){
+  e&&e.stopPropagation();
+  const c=CARDS.find(x=>x.id===id);if(!c)return;
+  _editId=id;_editView=c.v;_editStage=c.stage;_curStatus=c.status||'kep';
+  document.getElementById('modalTitle').textContent='캠페인 편집';
+  document.getElementById('fCode').value=c.code||'';
+  document.getElementById('fCh').value=c.ch||'sms';
+  document.getElementById('fLabel').value=c.label||'';
+  document.getElementById('fTiming').value=c.timing||'';
+  document.getElementById('fPush').checked=!!c.push;
+  document.getElementById('fTrigger').value=c.trigger||'';
+  document.getElementById('fOffer').value=c.offer||'';
+  document.getElementById('fMessage').value=c.msg||'';
+  document.getElementById('fStatusRow').style.display=c.v==='tobe'?'':'none';
+  hlStatus(_curStatus);
+  closeDet();
+  document.getElementById('modalOv').classList.add('on');
+}
+function saveCard(){
+  const label=document.getElementById('fLabel').value.trim();
+  if(!label){alert('캠페인명을 입력하세요.');return;}
+  const data={
+    code:document.getElementById('fCode').value.trim(),
+    ch:document.getElementById('fCh').value,
+    label,
+    timing:document.getElementById('fTiming').value.trim(),
+    push:document.getElementById('fPush').checked,
+    trigger:document.getElementById('fTrigger').value.trim(),
+    offer:document.getElementById('fOffer').value.trim(),
+    msg:document.getElementById('fMessage').value.trim(),
+  };
+  if(_editId){
+    const c=CARDS.find(x=>x.id===_editId);
+    if(c){Object.assign(c,data);if(c.v==='tobe')c.status=_curStatus;}
+  }else{
+    const nc={id:uid(),stage:_editStage,v:_editView,...data};
+    if(_editView==='tobe')nc.status=_curStatus;
+    const grp=CARDS.filter(x=>x.stage===_editStage&&x.v===_editView);
+    nc.ord=grp.length?Math.max(...grp.map(x=>ordOf(x)))+10:0;
+    CARDS.push(nc);
+  }
+  closeModal();render();saveData();
+}
+function delCard(id,e){
+  e&&e.stopPropagation();
+  const c=CARDS.find(x=>x.id===id);if(!c)return;
+  if(!confirm('"'+c.label+'" 캠페인을 삭제하시겠습니까?'))return;
+  CARDS=CARDS.filter(x=>x.id!==id);
+  closeDet();render();saveData();
+}
+function closeModal(){document.getElementById('modalOv').classList.remove('on');}
+function pickStatus(s){_curStatus=s;hlStatus(s);}
+function hlStatus(s){
+  document.querySelectorAll('#fStatusBtns .st-btn').forEach(b=>{
+    b.className='st-btn'+(b.dataset.s===s?' on-'+b.dataset.s:'');
+  });
+}
+document.getElementById('modalOv').addEventListener('click',function(e){if(e.target===this)closeModal();});
+
+loadData();
+ensureOrder();
+renderSidebar();
+render();
+</script>
+</body>
+</html>

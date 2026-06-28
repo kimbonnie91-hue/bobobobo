@@ -1,0 +1,8 @@
+[theme]
+# 보는 사람의 브라우저/OS가 다크모드여도 항상 라이트 테마로 고정
+# (대시보드들이 흰 배경·짙은 글자 기준으로 디자인되어 다크모드에서 글자가 안 보이는 문제 방지)
+base = "light"
+backgroundColor = "#f8f9fc"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1e293b"
+primaryColor = "#2E68B0"

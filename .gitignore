@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.streamlit/secrets.toml
+secrets.toml
+wr_data_store.csv
+wr_member_store.csv
+send_perf_store.csv
+send_perf_mtd_store.csv
+data/combo_candidates.csv

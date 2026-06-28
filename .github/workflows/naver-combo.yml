@@ -1,0 +1,60 @@
+name: "네이버 조합키워드 수집 (④단계)"
+
+# ③단계 조합 후보(data/combo_candidates.csv)의 '조합키워드'를 네이버로 조회.
+# 카테고리/CEP 수집(naver-collect.yml)과 분리된 별도 배치 — 섞지 않음.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "상위 N개만 조회 (0 = 전체 2,148개)"
+        required: false
+        default: "600"
+
+permissions:
+  contents: write
+
+jobs:
+  collect-combo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pandas
+
+      - name: Collect Naver volumes for combo keywords
+        env:
+          NAVER_AD_API_KEY: ${{ secrets.NAVER_AD_API_KEY }}
+          NAVER_AD_SECRET: ${{ secrets.NAVER_AD_SECRET }}
+          NAVER_AD_CUSTOMER_ID: ${{ secrets.NAVER_AD_CUSTOMER_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="--limit ${{ github.event.inputs.limit }}"
+          fi
+          python naver_keyword_data.py --source combo $ARGS
+
+      - name: Commit naver raw data (combo CSV는 앱이 런타임 생성 → 커밋 안 함)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 원천 데이터(naver_combo_metrics.csv)만 커밋한다. 생성물 combo_candidates.csv는
+          # git에서 제외(.gitignore)했고 Streamlit 앱이 런타임에 빌드하므로 충돌이 없다.
+          cp data/naver_combo_metrics.csv /tmp/naver_combo.csv
+          for attempt in 1 2 3 4; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            cp /tmp/naver_combo.csv data/naver_combo_metrics.csv
+            git add data/naver_combo_metrics.csv
+            if git diff --cached --quiet; then echo "No changes"; break; fi
+            git commit -m "네이버 조합키워드 수집 (④단계) $(date +%Y-%m-%d)"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo "pushed"; break; fi
+            echo "push 실패 — 재시도 $attempt"; sleep 3
+          done

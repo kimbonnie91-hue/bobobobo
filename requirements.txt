@@ -1,0 +1,13 @@
+streamlit
+pandas
+openpyxl
+plotly
+scipy
+numpy
+seaborn
+matplotlib
+streamlit-quill
+google-genai
+gspread>=6.0.0
+google-auth
+requests

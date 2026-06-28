@@ -1,0 +1,61 @@
+name: "네이버 키워드 데이터 수집"
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "테스트용 키워드 수 제한 (0 = 전체)"
+        required: false
+        default: "0"
+  schedule:
+    - cron: "0 3 1 * *"   # 매월 1일 12:00 KST (UTC 03:00)
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Collect Naver data (category + CEP)
+        env:
+          NAVER_AD_API_KEY: ${{ secrets.NAVER_AD_API_KEY }}
+          NAVER_AD_SECRET: ${{ secrets.NAVER_AD_SECRET }}
+          NAVER_AD_CUSTOMER_ID: ${{ secrets.NAVER_AD_CUSTOMER_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="--limit ${{ github.event.inputs.limit }}"
+          fi
+          python naver_keyword_data.py $ARGS
+          python naver_keyword_data.py --source cep $ARGS
+
+      - name: Rebuild research CSVs
+        run: |
+          python build_keyword_data.py
+          python build_cep_data.py
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/naver_keyword_metrics.csv data/lfmall_keyword_research.csv \
+                  data/naver_cep_metrics.csv data/cep_keyword_research.csv
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "네이버 키워드 데이터 자동 수집 $(date +%Y-%m-%d)"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
