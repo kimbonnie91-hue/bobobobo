@@ -220,10 +220,12 @@ def merge_msg_perf(msg_df: pd.DataFrame, perf_df: pd.DataFrame) -> pd.DataFrame:
     if perf_df.empty:
         return perf_df.copy()
 
-    # send_id 기준 조인
+    # send_id 기준 조인 (문구 파일이 비었거나 헤더를 못 읽었으면 send_id 컬럼이 없을 수 있음)
     msg_cols = ["send_id", "title", "body", "target", "channel"]
-    msg_sub = msg_df[[c for c in msg_cols if c in msg_df.columns]].copy()
-    msg_sub = msg_sub.rename(columns={})
+    if msg_df is None or msg_df.empty or "send_id" not in msg_df.columns:
+        msg_sub = pd.DataFrame(columns=msg_cols)
+    else:
+        msg_sub = msg_df[[c for c in msg_cols if c in msg_df.columns]].copy()
 
     merged = perf_df.merge(msg_sub, on="send_id", how="left")
     for c in ("title", "body", "target", "channel"):
@@ -1074,6 +1076,9 @@ def main():
                 try:
                     msg_df  = parse_msg_bytes(msg_file.read())
                     perf_df = parse_perf_bytes(perf_file.read())
+                    if msg_df.empty or "send_id" not in msg_df.columns:
+                        st.warning("⚠️ 문구 파일에서 '발송ID' 등 인식 가능한 헤더를 찾지 못했어요. "
+                                   "문구 없이 실적 데이터만으로 분석을 진행합니다.")
                     df_raw  = merge_msg_perf(msg_df, perf_df)
                     st.success(f"✅ 병합 완료 — {len(df_raw):,}건")
                 except Exception as e:
