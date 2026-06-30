@@ -62,18 +62,18 @@ HOUR_BANDS = {
 # ── 1-A. 문구 데이터 파싱 ────────────────────────────────────────────────────
 
 MSG_COLMAP = {
-    "발송ID": "send_id", "발송 ID": "send_id",
-    "발송일시": "send_dt", "발송 일시": "send_dt", "날짜": "send_dt", "일시": "send_dt",
+    "발송ID": "send_id", "발송 ID": "send_id", "AF코드": "send_id", "AF 코드": "send_id",
+    "발송일시": "send_dt", "발송 일시": "send_dt", "날짜": "send_dt", "일시": "send_dt", "일자": "send_dt",
     "BPU": "bpu", "사업부": "bpu", "브랜드": "bpu",
     "푸시타이틀": "title", "타이틀": "title", "제목": "title",
     "푸시본문": "body", "본문": "body", "내용": "body",
-    "타겟조건": "target", "타겟 조건": "target", "타겟": "target",
+    "타겟조건": "target", "타겟 조건": "target", "타겟": "target", "타겟 구분": "target",
     "발송채널": "channel", "채널": "channel",
 }
 
 PERF_COLMAP = {
-    "발송ID": "send_id", "발송 ID": "send_id",
-    "발송일시": "send_dt", "발송 일시": "send_dt", "날짜": "send_dt",
+    "발송ID": "send_id", "발송 ID": "send_id", "AF코드": "send_id", "AF 코드": "send_id",
+    "발송일시": "send_dt", "발송 일시": "send_dt", "날짜": "send_dt", "일자": "send_dt",
     "BPU": "bpu", "사업부": "bpu",
     "발송건수": "send_cnt", "발송": "send_cnt", "발송량": "send_cnt",
     "오픈건수": "open_cnt", "클릭수": "open_cnt", "클릭건수": "open_cnt", "UV": "open_cnt",
@@ -83,21 +83,43 @@ PERF_COLMAP = {
     "시간대": "hour",
 }
 
+# 식별자(ID)로 인정할 표준 컬럼 — 헤더 탐지 시 이 중 하나가 있어야 유효한 데이터 행으로 본다
+_ID_KEYS = {"send_id"}
+# 헤더 행 탐지 시 함께 있어야 "진짜 데이터 표"로 인정하는 보조 키워드(문구/실적 공용)
+_MSG_HINT_KEYS = {"title", "body"}
+_PERF_HINT_KEYS = {"send_cnt", "open_cnt", "gmv", "conv_cnt"}
 
-def _parse_sheet_df(ws_rows: list, colmap: dict) -> pd.DataFrame:
-    """2D 행 리스트 → colmap 기반 DataFrame."""
-    if not ws_rows:
+
+def _find_header_row(ws_rows: list, colmap: dict, hint_keys: set, max_scan: int = 10):
+    """ws_rows 상단 max_scan 행을 훑어 colmap 매칭 헤더 행의 인덱스를 찾는다.
+    실제 LF몰 엑셀은 헤더가 1행이 아니라 2~3행에 있거나, 안내문구가 앞에 붙는 경우가 있다.
+    ID 키 + 힌트 키가 함께 매칭되는 행을 우선한다."""
+    best_i, best_score = None, 0
+    for i, row in enumerate(ws_rows[:max_scan]):
+        hdr = [str(c).strip() if c is not None else "" for c in row]
+        stds = {colmap[h] for h in hdr if h in colmap}
+        if not stds:
+            continue
+        score = len(stds & _ID_KEYS) * 10 + len(stds & hint_keys) * 3 + len(stds)
+        if score > best_score:
+            best_score, best_i = score, i
+    return best_i
+
+
+def _parse_sheet_df(ws_rows: list, colmap: dict, header_row: int = 0) -> pd.DataFrame:
+    """2D 행 리스트 → colmap 기반 DataFrame. header_row 위치의 행을 헤더로 사용."""
+    if not ws_rows or header_row >= len(ws_rows):
         return pd.DataFrame()
-    hdr = [str(c).strip() if c is not None else "" for c in ws_rows[0]]
+    hdr = [str(c).strip() if c is not None else "" for c in ws_rows[header_row]]
     col_idx = {}
-    for h, i in ((h, i) for i, h in enumerate(hdr)):
+    for i, h in enumerate(hdr):
         std = colmap.get(h)
         if std and std not in col_idx:
             col_idx[std] = i
     if not col_idx:
         return pd.DataFrame()
     recs = []
-    for row in ws_rows[1:]:
+    for row in ws_rows[header_row + 1:]:
         rec = {}
         for std, i in col_idx.items():
             rec[std] = row[i] if i < len(row) else None
@@ -105,54 +127,91 @@ def _parse_sheet_df(ws_rows: list, colmap: dict) -> pd.DataFrame:
     return pd.DataFrame(recs)
 
 
+def _sheet_headers_preview(wb, max_sheets: int = 5, max_cols: int = 20) -> str:
+    """오류 메시지용 — 시트별 첫 행 헤더 미리보기 문자열."""
+    lines = []
+    for s in wb.sheetnames[:max_sheets]:
+        ws = wb[s]
+        hdr = [str(v).strip() if v else "" for v in
+               next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
+        hdr = [h for h in hdr if h][:max_cols]
+        lines.append(f"  · [{s}] {', '.join(hdr) if hdr else '(빈 헤더)'}")
+    return "\n".join(lines)
+
+
 def parse_msg_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.DataFrame:
-    """문구 엑셀 → DataFrame."""
+    """문구 엑셀 → DataFrame. 시트/헤더 위치를 자동 탐지하며, 매칭 실패 시 실제 헤더를 보여주는 오류를 낸다."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-    # 시트 선택 전략
-    target = None
-    if sheet_name and sheet_name in wb.sheetnames:
-        target = sheet_name
-    else:
-        for s in wb.sheetnames:
+    try:
+        candidates = [sheet_name] if (sheet_name and sheet_name in wb.sheetnames) else wb.sheetnames
+        best = None  # (score, sheet, header_row, rows)
+        for s in candidates:
             ws = wb[s]
-            hdr = [str(v).strip() if v else "" for v in
-                   next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
-            if any(h in MSG_COLMAP for h in hdr):
-                if "타이틀" in hdr or "제목" in hdr or "본문" in hdr or "내용" in hdr:
-                    target = s
-                    break
-    if target is None and wb.sheetnames:
-        target = wb.sheetnames[0]
-    ws = wb[target]
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
-    df = _parse_sheet_df(rows, MSG_COLMAP)
+            rows = list(ws.iter_rows(values_only=True))
+            hi = _find_header_row(rows, MSG_COLMAP, _MSG_HINT_KEYS)
+            if hi is None:
+                continue
+            hdr = [str(c).strip() if c is not None else "" for c in rows[hi]]
+            stds = {MSG_COLMAP[h] for h in hdr if h in MSG_COLMAP}
+            score = len(stds & _ID_KEYS) * 10 + len(stds & _MSG_HINT_KEYS) * 3 + len(stds)
+            if best is None or score > best[0]:
+                best = (score, s, hi, rows)
+        if best is None or "send_id" not in {
+            MSG_COLMAP[h] for h in
+            ([str(c).strip() if c is not None else "" for c in best[3][best[2]]] if best else [])
+            if h in MSG_COLMAP
+        }:
+            preview = _sheet_headers_preview(wb)
+            raise ValueError(
+                "문구 파일에서 발송 식별자(발송ID 또는 AF코드) 컬럼을 찾지 못했습니다.\n"
+                f"감지된 시트/헤더:\n{preview}"
+            )
+        _, target, hi, rows = best
+        df = _parse_sheet_df(rows, MSG_COLMAP, header_row=hi)
+    finally:
+        wb.close()
     return _finalize_msg(df)
 
 
 def parse_perf_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.DataFrame:
-    """실적 엑셀 → DataFrame."""
+    """실적 엑셀 → DataFrame. 시트/헤더 위치를 자동 탐지하며, 매칭 실패 시 실제 헤더를 보여주는 오류를 낸다."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-    target = None
-    if sheet_name and sheet_name in wb.sheetnames:
-        target = sheet_name
-    else:
-        for s in wb.sheetnames:
+    try:
+        candidates = [sheet_name] if (sheet_name and sheet_name in wb.sheetnames) else wb.sheetnames
+        # "소재별 실적" 이름의 시트가 있으면 최우선
+        named = [s for s in candidates if "소재별 실적" in s]
+        ordered = named + [s for s in candidates if s not in named]
+
+        best = None
+        for s in ordered:
             ws = wb[s]
-            hdr = [str(v).strip() if v else "" for v in
-                   next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
-            if any(h in PERF_COLMAP for h in hdr):
-                if any(h in ("발송건수", "발송", "발송량", "오픈건수", "거래액", "GMV") for h in hdr):
-                    target = s
-                    break
-    if target is None and wb.sheetnames:
-        target = wb.sheetnames[0]
-    ws = wb[target]
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
-    df = _parse_sheet_df(rows, PERF_COLMAP)
+            rows = list(ws.iter_rows(values_only=True))
+            hi = _find_header_row(rows, PERF_COLMAP, _PERF_HINT_KEYS)
+            if hi is None:
+                continue
+            hdr = [str(c).strip() if c is not None else "" for c in rows[hi]]
+            stds = {PERF_COLMAP[h] for h in hdr if h in PERF_COLMAP}
+            score = len(stds & _ID_KEYS) * 10 + len(stds & _PERF_HINT_KEYS) * 3 + len(stds)
+            if s in named:
+                score += 50
+            if best is None or score > best[0]:
+                best = (score, s, hi, rows)
+        if best is None or "send_id" not in {
+            PERF_COLMAP[h] for h in
+            ([str(c).strip() if c is not None else "" for c in best[3][best[2]]] if best else [])
+            if h in PERF_COLMAP
+        }:
+            preview = _sheet_headers_preview(wb)
+            raise ValueError(
+                "실적 파일에서 발송 식별자(발송ID 또는 AF코드) 컬럼을 찾지 못했습니다.\n"
+                f"감지된 시트/헤더:\n{preview}"
+            )
+        _, target, hi, rows = best
+        df = _parse_sheet_df(rows, PERF_COLMAP, header_row=hi)
+    finally:
+        wb.close()
     return _finalize_perf(df)
 
 
@@ -216,20 +275,37 @@ def _hour_to_band(h):
 # ── 1-B. 데이터 조인 ─────────────────────────────────────────────────────────
 
 def merge_msg_perf(msg_df: pd.DataFrame, perf_df: pd.DataFrame) -> pd.DataFrame:
-    """실적 기준 좌-조인: send_id 일치 → 문구 컬럼 부착. send_id 없으면 send_dt+bpu 폴백."""
+    """실적 기준 좌-조인: send_id 일치 → 문구 컬럼 부착. 문구 데이터가 비어있거나
+    send_id가 없으면 문구 없이 실적만으로 진행한다(태깅은 빈 문자열 기준으로 동작)."""
     if perf_df.empty:
         return perf_df.copy()
 
+    if msg_df is None or msg_df.empty or "send_id" not in msg_df.columns:
+        merged = perf_df.copy()
+        for c in ("title", "body", "target", "channel"):
+            if c not in merged:
+                merged[c] = ""
+        return tag_copy(merged)
+
     # send_id 기준 조인
-    msg_cols = ["send_id", "title", "body", "target", "channel"]
+    msg_cols = ["send_id", "title", "body", "target", "channel", "bpu"]
     msg_sub = msg_df[[c for c in msg_cols if c in msg_df.columns]].copy()
-    msg_sub = msg_sub.rename(columns={})
+    if "bpu" in msg_sub.columns:
+        msg_sub = msg_sub.rename(columns={"bpu": "bpu_msg"})
 
     merged = perf_df.merge(msg_sub, on="send_id", how="left")
     for c in ("title", "body", "target", "channel"):
         if c not in merged:
             merged[c] = ""
         merged[c] = merged[c].fillna("")
+
+    # BPU: 실적 파일에 값이 비어 있으면 문구 파일의 BPU로 보완
+    if "bpu_msg" in merged.columns:
+        if "bpu" not in merged:
+            merged["bpu"] = ""
+        merged["bpu"] = merged["bpu"].mask(merged["bpu"].astype(str).str.strip() == "", merged["bpu_msg"])
+        merged["bpu"] = merged["bpu"].fillna("").astype(str).str.strip()
+        merged = merged.drop(columns=["bpu_msg"])
 
     # 문구 태깅
     merged = tag_copy(merged)
@@ -994,7 +1070,7 @@ def _gs_creds():
 
 
 def load_from_gsheet(spreadsheet_url: str):
-    """구글시트 URL → (msg_df, perf_df). 문구/실적 시트를 자동 탐색."""
+    """구글시트 URL → (msg_df, perf_df). 문구/실적 시트를 자동 탐색(헤더 행 위치 자동 탐지)."""
     try:
         import gspread
         creds = _gs_creds()
@@ -1003,17 +1079,34 @@ def load_from_gsheet(spreadsheet_url: str):
         gc = gspread.authorize(creds)
         sh = gc.open_by_url(spreadsheet_url)
         msg_df, perf_df = None, None
+        msg_best = perf_best = None  # (score, rows, header_row)
         for ws in sh.worksheets():
             rows = ws.get_all_values()
             if not rows:
                 continue
-            hdr = [str(c).strip() for c in rows[0]]
-            has_title = any(h in MSG_COLMAP for h in hdr)
-            has_send  = any(h in PERF_COLMAP for h in hdr)
-            if has_title and ("타이틀" in hdr or "제목" in hdr or "본문" in hdr or "내용" in hdr):
-                msg_df = _finalize_msg(_parse_sheet_df(rows, MSG_COLMAP))
-            elif has_send and ("발송건수" in hdr or "발송" in hdr or "오픈건수" in hdr or "거래액" in hdr or "GMV" in hdr):
-                perf_df = _finalize_perf(_parse_sheet_df(rows, PERF_COLMAP))
+
+            hi_msg = _find_header_row(rows, MSG_COLMAP, _MSG_HINT_KEYS)
+            if hi_msg is not None:
+                hdr = [str(c).strip() for c in rows[hi_msg]]
+                stds = {MSG_COLMAP[h] for h in hdr if h in MSG_COLMAP}
+                if "send_id" in stds and (stds & _MSG_HINT_KEYS):
+                    score = len(stds)
+                    if msg_best is None or score > msg_best[0]:
+                        msg_best = (score, rows, hi_msg)
+
+            hi_perf = _find_header_row(rows, PERF_COLMAP, _PERF_HINT_KEYS)
+            if hi_perf is not None:
+                hdr = [str(c).strip() for c in rows[hi_perf]]
+                stds = {PERF_COLMAP[h] for h in hdr if h in PERF_COLMAP}
+                if "send_id" in stds and (stds & _PERF_HINT_KEYS):
+                    score = len(stds)
+                    if perf_best is None or score > perf_best[0]:
+                        perf_best = (score, rows, hi_perf)
+
+        if msg_best:
+            msg_df = _finalize_msg(_parse_sheet_df(msg_best[1], MSG_COLMAP, header_row=msg_best[2]))
+        if perf_best:
+            perf_df = _finalize_perf(_parse_sheet_df(perf_best[1], PERF_COLMAP, header_row=perf_best[2]))
         return msg_df, perf_df
     except Exception as e:
         st.error(f"Google Sheets 연동 오류: {e}")
