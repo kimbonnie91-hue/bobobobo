@@ -216,14 +216,17 @@ def _hour_to_band(h):
 # ── 1-B. 데이터 조인 ─────────────────────────────────────────────────────────
 
 def merge_msg_perf(msg_df: pd.DataFrame, perf_df: pd.DataFrame) -> pd.DataFrame:
-    """실적 기준 좌-조인: send_id 일치 → 문구 컬럼 부착. send_id 없으면 send_dt+bpu 폴백."""
+    """실적 기준 좌-조인: send_id 기준으로 문구 컬럼 부착.
+    문구 파일이 없거나 send_id 컬럼을 못 읽으면 문구 컬럼은 빈 값으로 채워진다."""
     if perf_df.empty:
         return perf_df.copy()
 
-    # send_id 기준 조인
+    # send_id 기준 조인 (문구 파일이 비었거나 헤더를 못 읽었으면 send_id 컬럼이 없을 수 있음)
     msg_cols = ["send_id", "title", "body", "target", "channel"]
-    msg_sub = msg_df[[c for c in msg_cols if c in msg_df.columns]].copy()
-    msg_sub = msg_sub.rename(columns={})
+    if msg_df is None or msg_df.empty or "send_id" not in msg_df.columns:
+        msg_sub = pd.DataFrame(columns=msg_cols)
+    else:
+        msg_sub = msg_df[[c for c in msg_cols if c in msg_df.columns]].copy()
 
     merged = perf_df.merge(msg_sub, on="send_id", how="left")
     for c in ("title", "body", "target", "channel"):
@@ -402,6 +405,51 @@ def _fig_layout(fig, height=420, margin=dict(l=40, r=20, t=40, b=40)):
     return fig
 
 
+_TOKEN_RE = re.compile(r"[가-힣]{2,}|[A-Za-z]{2,}")
+_KW_STOPWORDS = {
+    "지금", "오늘", "바로", "당신", "위한", "여기", "혜택", "그리고", "에서", "으로",
+    "합니다", "하세요", "보세요", "있습니다", "만나보세요", "확인하세요", "드려요",
+}
+
+
+def _extract_keyword_freq(texts: list, top_n: int = 25) -> list:
+    """문구 텍스트 목록에서 한글/영문 키워드(2자 이상) 빈도를 집계한다."""
+    counts = {}
+    for t in texts:
+        for tok in _TOKEN_RE.findall(str(t)):
+            if tok in _KW_STOPWORDS:
+                continue
+            counts[tok] = counts.get(tok, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    return ranked
+
+
+def _keyword_cloud_fig(kw_freq: list):
+    """matplotlib WordCloud는 한글 폰트가 내장되지 않으면 깨지므로,
+    Plotly 텍스트 산점도로 워드클라우드 느낌을 안전하게 구현한다."""
+    rng = np.random.default_rng(7)
+    n = len(kw_freq)
+    max_cnt = max(c for _, c in kw_freq)
+    xs = rng.uniform(0, 10, n)
+    ys = rng.uniform(0, 10, n)
+    sizes = [14 + (c / max_cnt) * 46 for _, c in kw_freq]
+    colors = [PAL["primary"], PAL["success"], PAL["warning"], PAL["purple"], PAL["danger"]]
+    fig = go.Figure(go.Scatter(
+        x=xs, y=ys, mode="text",
+        text=[w for w, _ in kw_freq],
+        textfont=dict(size=sizes, color=[colors[i % len(colors)] for i in range(n)]),
+        hovertext=[f"{w}: {c}회" for w, c in kw_freq],
+        hoverinfo="text",
+    ))
+    fig.update_layout(
+        height=320, plot_bgcolor=PAL["card"], paper_bgcolor=PAL["bg"],
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(visible=False, range=[-1, 11]),
+        yaxis=dict(visible=False, range=[-1, 11]),
+    )
+    return fig
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. 분석 탭 렌더링 함수
 # ══════════════════════════════════════════════════════════════════════════════
@@ -537,7 +585,7 @@ def tab_copy_analysis(df: pd.DataFrame):
 
     st.markdown("---")
 
-    # ── 상위 10 문구 테이블
+    # ── 상위 10 문구 테이블 (CTR 컬러 그라데이션)
     _section("CTR 상위 10개 문구", "🏆")
     top10 = (
         df[df["send_cnt"] >= df["send_cnt"].quantile(.25)]  # 소량 발송 제외
@@ -545,18 +593,35 @@ def tab_copy_analysis(df: pd.DataFrame):
         .head(10)
         [["send_id", "bpu", "title", "body", "copy_type", "send_cnt", "ctr", "cvr", "gmv"]]
         .copy()
+        .rename(columns={
+            "send_id": "발송ID", "bpu": "BPU", "title": "타이틀", "body": "본문",
+            "copy_type": "유형", "send_cnt": "발송수", "ctr": "CTR", "cvr": "CVR", "gmv": "GMV",
+        })
+        .reset_index(drop=True)
     )
-    top10["CTR"]  = top10["ctr"].apply(lambda v: f"{v*100:.2f}%")
-    top10["CVR"]  = top10["cvr"].apply(lambda v: f"{v*100:.2f}%")
-    top10["GMV"]  = top10["gmv"].apply(lambda v: f"₩{v:,.0f}")
-    top10["발송수"] = top10["send_cnt"].apply(lambda v: f"{v:,}")
-    st.dataframe(
-        top10.rename(columns={
-            "send_id": "발송ID", "bpu": "BPU",
-            "title": "타이틀", "body": "본문", "copy_type": "유형",
-        })[["발송ID", "BPU", "타이틀", "본문", "유형", "발송수", "CTR", "CVR", "GMV"]],
-        use_container_width=True, hide_index=True,
+    styled_top10 = (
+        top10.style
+        .background_gradient(subset=["CTR"], cmap="Blues")
+        .format({
+            "CTR": lambda v: f"{v*100:.2f}%",
+            "CVR": lambda v: f"{v*100:.2f}%",
+            "GMV": lambda v: f"₩{v:,.0f}",
+            "발송수": lambda v: f"{v:,}",
+        })
     )
+    st.dataframe(styled_top10, use_container_width=True, hide_index=True)
+
+    # ── 고성과 카피 키워드 빈도 ("워드클라우드" — 한글 폰트 미내장 환경에서도
+    #     안전하게 렌더링되도록 Plotly 텍스트 산점도로 구현)
+    st.markdown("---")
+    _section("고성과 카피 키워드 분석", "☁️")
+    high_ctr_texts = df.loc[df["ctr"] >= df["ctr"].quantile(.75), ["title", "body"]]
+    kw_freq = _extract_keyword_freq(high_ctr_texts["title"].tolist() + high_ctr_texts["body"].tolist())
+    if kw_freq:
+        st.plotly_chart(_keyword_cloud_fig(kw_freq), use_container_width=True)
+        st.caption("CTR 상위 25% 문구(타이틀+본문)에서 자주 등장하는 키워드입니다. 글자 크기 = 등장 빈도.")
+    else:
+        st.caption("키워드를 추출할 만한 문구 데이터가 부족합니다.")
 
     # ── AI 인사이트 (간이 규칙 기반)
     st.markdown("---")
@@ -866,6 +931,8 @@ def tab_bpu_analysis(df: pd.DataFrame):
     ).reset_index()
     bpu_g["rps"]   = np.where(bpu_g["total_send"] > 0,
                                bpu_g["total_gmv"] / bpu_g["total_send"], 0)
+    bpu_g["gpo"]   = np.where(bpu_g["total_open"] > 0,
+                               bpu_g["total_gmv"] / bpu_g["total_open"], 0)  # 클릭(오픈)당 GMV
     bpu_g["gmv_share"] = bpu_g["total_gmv"] / bpu_g["total_gmv"].sum()
     bpu_g = bpu_g.sort_values("total_gmv", ascending=False).reset_index(drop=True)
 
@@ -931,6 +998,16 @@ def tab_bpu_analysis(df: pd.DataFrame):
                 size=np.sqrt(row["total_send"] / bpu_g["total_send"].max()) * 60 + 10,
                 opacity=0.75,
             ),
+            customdata=[[row["total_send"], row["total_open"], row["gpo"]]],
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "평균 CTR: %{x:.2f}%<br>"
+                "발송건당 GMV: ₩%{y:,.0f}<br>"
+                "클릭당 GMV: ₩%{customdata[2]:,.0f}<br>"
+                "총 발송: %{customdata[0]:,.0f}건<br>"
+                "총 클릭: %{customdata[1]:,.0f}건"
+                "<extra></extra>"
+            ),
         ))
     # 사분면 기준선
     avg_x = df["ctr"].mean() * 100
@@ -964,11 +1041,13 @@ def tab_bpu_analysis(df: pd.DataFrame):
     disp["평균 CTR"]   = disp["avg_ctr"].apply(lambda v: f"{v*100:.2f}%")
     disp["평균 CVR"]   = disp["avg_cvr"].apply(lambda v: f"{v*100:.2f}%")
     disp["발송건당GMV"] = disp["rps"].apply(lambda v: f"₩{v:,.1f}")
+    disp["클릭당GMV"]   = disp["gpo"].apply(lambda v: f"₩{v:,.1f}")
     disp["GMV 점유율"] = disp["gmv_share"].apply(lambda v: f"{v*100:.1f}%")
     disp["캠페인 수"]  = disp["n_campaigns"]
     st.dataframe(
         disp.rename(columns={"bpu": "BPU"})[
-            ["BPU", "캠페인 수", "총 발송", "평균 CTR", "평균 CVR", "총 GMV", "발송건당GMV", "GMV 점유율"]
+            ["BPU", "캠페인 수", "총 발송", "평균 CTR", "평균 CVR", "총 GMV",
+             "발송건당GMV", "클릭당GMV", "GMV 점유율"]
         ],
         use_container_width=True, hide_index=True,
     )
@@ -1074,6 +1153,9 @@ def main():
                 try:
                     msg_df  = parse_msg_bytes(msg_file.read())
                     perf_df = parse_perf_bytes(perf_file.read())
+                    if msg_df.empty or "send_id" not in msg_df.columns:
+                        st.warning("⚠️ 문구 파일에서 '발송ID' 등 인식 가능한 헤더를 찾지 못했어요. "
+                                   "문구 없이 실적 데이터만으로 분석을 진행합니다.")
                     df_raw  = merge_msg_perf(msg_df, perf_df)
                     st.success(f"✅ 병합 완료 — {len(df_raw):,}건")
                 except Exception as e:
