@@ -11,3 +11,4 @@ google-genai
 gspread>=6.0.0
 google-auth
 requests
+statsmodels
