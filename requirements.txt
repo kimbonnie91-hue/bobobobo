@@ -1,6 +1,7 @@
 streamlit
 pandas
 openpyxl
+xlrd
 plotly
 scipy
 statsmodels
