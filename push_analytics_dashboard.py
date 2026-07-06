@@ -1150,15 +1150,21 @@ def _gs_creds():
         return None
 
 
-def _find_header_row(rows: list, colmap: dict, max_scan: int = 20) -> int:
-    """rows 앞 max_scan 행 중 colmap 키 매칭이 가장 많은 행 인덱스를 반환."""
-    best_idx, best_count = 0, 0
+def _find_header_row(rows: list, colmap: dict, max_scan: int = 30) -> int:
+    """rows 앞 max_scan 행 중 colmap 키 매칭이 가장 많은 행 인덱스를 반환.
+    매칭이 전혀 없으면 첫 번째 비어있지 않은 행 인덱스를 반환."""
+    best_idx, best_count = -1, 0
+    first_nonempty = None
     for i, row in enumerate(rows[:max_scan]):
         hdr = [str(c).strip() if c else "" for c in row]
+        if first_nonempty is None and any(hdr):
+            first_nonempty = i
         count = sum(1 for h in hdr if h in colmap)
         if count > best_count:
             best_count = count
             best_idx = i
+    if best_count == 0:
+        return first_nonempty if first_nonempty is not None else 0
     return best_idx
 
 
@@ -1197,16 +1203,17 @@ def load_msg_from_gsheet(spreadsheet_url: str):
                 debug_info.append((ws.title, "(빈 시트)", "empty"))
                 continue
 
-            # 첫 20행 스캔해서 컬럼명이 가장 많이 매칭되는 행을 헤더로 사용
-            hdr_idx = _find_header_row(rows, MSG_COLMAP, max_scan=20)
+            # 첫 30행 스캔해서 컬럼명이 가장 많이 매칭되는 행을 헤더로 사용
+            hdr_idx = _find_header_row(rows, MSG_COLMAP)
             hdr = [str(c).strip() for c in rows[hdr_idx]]
             matched = sum(1 for h in hdr if h in MSG_COLMAP)
-            hdr_preview = ", ".join(h for h in hdr[:10] if h) or "(빈 행)"
+            # 매칭 안 돼도 실제 첫 번째 비어있지 않은 행 내용을 그대로 보여줌
+            nonempty_hdr = ", ".join(h for h in hdr[:12] if h)
+            hdr_preview = nonempty_hdr or f"(빈 행 — {hdr_idx+1}행까지 비어 있음)"
 
             if matched >= 2:
                 parsed = _finalize_msg(_parse_sheet_df(rows[hdr_idx:], MSG_COLMAP))
                 if not parsed.empty:
-                    # 시트명에서 발송주차 자동 주입 (send_week가 비어있을 때)
                     if "send_week" not in parsed.columns or parsed["send_week"].eq("").all():
                         parsed["send_week"] = ws.title
                     all_dfs.append(parsed)
@@ -1214,7 +1221,7 @@ def load_msg_from_gsheet(spreadsheet_url: str):
                 else:
                     debug_info.append((ws.title, hdr_preview, f"— 파싱 결과 없음(헤더:{hdr_idx+1}행)"))
             else:
-                debug_info.append((ws.title, hdr_preview, f"— 매칭 컬럼 부족({matched}개)"))
+                debug_info.append((ws.title, hdr_preview, f"— 매칭 컬럼 부족({matched}개, 헤더:{hdr_idx+1}행)"))
 
         msg_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else None
         return msg_df, debug_info
