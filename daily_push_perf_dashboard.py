@@ -1084,48 +1084,46 @@ def main():
             st.caption("엑셀의 **'발송 건수'**·**'RawNew'** 시트와 같은 원본 형태로 입력하면, 엑셀 업로드와 "
                       "**완전히 같은 방식**(CHNL_DTL_CD='Total' 우선 등)으로 발송모수/UV/VISIT/고객수/주문건수/거래액을 "
                       "자동 계산해서 저장해요. 두 표 모두 **AF코드**·**일자(YYYYMMDD)** 는 필수예요.")
-            rc1, rc2 = st.columns(2)
-            with rc1:
-                st.markdown("**발송 건수** (발송로그)")
-                if "raw_send_ver" not in st.session_state:
-                    st.session_state.raw_send_ver = 0
-                send_edit = st.data_editor(
-                    _blank_editor_df(SEND_COUNT_ENTRY_COLS, SEND_COUNT_ENTRY_NUM), num_rows="dynamic",
-                    use_container_width=True, height=260,
-                    column_config={
-                        "date": st.column_config.TextColumn("발송일시*", help="YYYYMMDD, 예: 20260706"),
-                        "camp_name": st.column_config.TextColumn("캠페인명"),
-                        "camp_code": st.column_config.TextColumn("캠페인코드"),
-                        "auto_code": st.column_config.TextColumn("자동캠페인코드"),
-                        "channel": st.column_config.TextColumn("발송채널"),
-                        "af": st.column_config.TextColumn("AF코드*"),
-                        "camp_type": st.column_config.TextColumn("캠페인구분"),
-                        "send_kind": st.column_config.TextColumn("발송구분"),
-                        "send": st.column_config.NumberColumn("모수*"),
-                    }, key=f"raw_send_editor_{st.session_state.raw_send_ver}")
-            with rc2:
-                st.markdown("**RawNew** (성과 원자료)")
-                if "raw_perf_ver" not in st.session_state:
-                    st.session_state.raw_perf_ver = 0
-                perf_edit = st.data_editor(
-                    _blank_editor_df(RAWNEW_ENTRY_COLS, RAWNEW_ENTRY_NUM), num_rows="dynamic",
-                    use_container_width=True, height=260,
-                    column_config={
-                        "std_ym": st.column_config.TextColumn("STD_YM"),
-                        "date": st.column_config.TextColumn("STD_DD*", help="YYYYMMDD, 예: 20260706"),
-                        "af": st.column_config.TextColumn("AF_CD*"),
-                        "af_nm": st.column_config.TextColumn("AF_NM"),
-                        "lctgr": st.column_config.TextColumn("AF_LCTGR_NM"),
-                        "mctgr": st.column_config.TextColumn("AF_MCTGR_NM"),
-                        "sctgr": st.column_config.TextColumn("AF_SCTGR_NM"),
-                        "chnl": st.column_config.TextColumn("CHNL_DTL_CD", help="여러 세부채널이 있으면 'Total' 행을 넣는 걸 권장"),
-                        "uv": st.column_config.NumberColumn("UV"),
-                        "visit": st.column_config.NumberColumn("SV"),
-                        "cust": st.column_config.NumberColumn("CUST_CNT"),
-                        "oc": st.column_config.NumberColumn("ORD_CNT"),
-                        "sale_amt": st.column_config.NumberColumn("SALE_AMT"),
-                        "amt": st.column_config.NumberColumn("ORD_AMT"),
-                    }, key=f"raw_perf_editor_{st.session_state.raw_perf_ver}")
+            st.markdown("**발송 건수** (발송로그)")
+            if "raw_send_ver" not in st.session_state:
+                st.session_state.raw_send_ver = 0
+            send_edit = st.data_editor(
+                _blank_editor_df(SEND_COUNT_ENTRY_COLS, SEND_COUNT_ENTRY_NUM), num_rows="dynamic",
+                use_container_width=True, height=260,
+                column_config={
+                    "date": st.column_config.TextColumn("발송일시*", help="YYYYMMDD, 예: 20260706"),
+                    "camp_name": st.column_config.TextColumn("캠페인명"),
+                    "camp_code": st.column_config.TextColumn("캠페인코드"),
+                    "auto_code": st.column_config.TextColumn("자동캠페인코드"),
+                    "channel": st.column_config.TextColumn("발송채널"),
+                    "af": st.column_config.TextColumn("AF코드*"),
+                    "camp_type": st.column_config.TextColumn("캠페인구분"),
+                    "send_kind": st.column_config.TextColumn("발송구분"),
+                    "send": st.column_config.NumberColumn("모수*"),
+                }, key=f"raw_send_editor_{st.session_state.raw_send_ver}")
+
+            st.markdown("**RawNew** (성과 원자료)")
+            if "raw_perf_ver" not in st.session_state:
+                st.session_state.raw_perf_ver = 0
+            perf_edit = st.data_editor(
+                _blank_editor_df(RAWNEW_ENTRY_COLS, RAWNEW_ENTRY_NUM), num_rows="dynamic",
+                use_container_width=True, height=260,
+                column_config={
+                    "std_ym": st.column_config.TextColumn("STD_YM"),
+                    "date": st.column_config.TextColumn("STD_DD*", help="YYYYMMDD, 예: 20260706"),
+                    "af": st.column_config.TextColumn("AF_CD*"),
+                    "af_nm": st.column_config.TextColumn("AF_NM"),
+                    "lctgr": st.column_config.TextColumn("AF_LCTGR_NM"),
+                    "mctgr": st.column_config.TextColumn("AF_MCTGR_NM"),
+                    "sctgr": st.column_config.TextColumn("AF_SCTGR_NM"),
+                    "chnl": st.column_config.TextColumn("CHNL_DTL_CD", help="여러 세부채널이 있으면 'Total' 행을 넣는 걸 권장"),
+                    "uv": st.column_config.NumberColumn("UV"),
+                    "visit": st.column_config.NumberColumn("SV"),
+                    "cust": st.column_config.NumberColumn("CUST_CNT"),
+                    "oc": st.column_config.NumberColumn("ORD_CNT"),
+                    "sale_amt": st.column_config.NumberColumn("SALE_AMT"),
+                    "amt": st.column_config.NumberColumn("ORD_AMT"),
+                }, key=f"raw_perf_editor_{st.session_state.raw_perf_ver}")
 
             rb1, rb2 = st.columns(2)
             if rb1.button("🧮 계산해서 저장하기", use_container_width=True, key="raw_calc_save"):
