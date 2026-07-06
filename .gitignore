@@ -8,4 +8,5 @@ wr_data_store.csv
 wr_member_store.csv
 send_perf_store.csv
 send_perf_mtd_store.csv
+daily_push_perf_store.csv
 data/combo_candidates.csv
