@@ -613,6 +613,54 @@ def clean_rawnew_entry(edited):
     return d[RAWNEW_ENTRY_COLS]
 
 
+LOOKUP_METRIC_COLS = ["send", "uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr"]
+
+
+def lookup_send_uv_etc(meta_df, send_log_df, rawnew_df):
+    """메타데이터 표(날짜+AF코드 등)의 각 행에 대해 '발송 건수'/'RawNew' 표에서 (일자,AF코드) 기준으로
+    발송모수/UV/VISIT/고객수/주문건수/거래액을 찾아 채운다. 엑셀의
+    =SUMIFS(RawNew!UV, RawNew!일자, 일자, RawNew!AF코드, AF코드, RawNew!CHNL_DTL_CD,"Total") 와 동일한 방식
+    (일자+AF코드 합계, RawNew는 CHNL_DTL_CD='Total' 행이 있으면 그것만 사용). 유입전환율/주문전환율은
+    UV/발송, 주문건수/UV 비율로 계산한다. AF코드가 없거나 값을 못 찾으면 그대로 NaN으로 남긴다."""
+    d = meta_df.copy()
+    for c in LOOKUP_METRIC_COLS:
+        d[c] = np.nan
+    if d.empty:
+        return d
+
+    send_map = {}
+    if send_log_df is not None and not send_log_df.empty:
+        s = send_log_df.dropna(subset=["date"]).copy()
+        s = s[s["af"].astype(str).str.strip() != ""]
+        if not s.empty:
+            s["send"] = pd.to_numeric(s["send"], errors="coerce")
+            send_map = s.groupby(["date", "af"])["send"].sum().to_dict()
+
+    perf_map = {}
+    if rawnew_df is not None and not rawnew_df.empty:
+        r = rawnew_df.dropna(subset=["date"]).copy()
+        r = r[r["af"].astype(str).str.strip() != ""]
+        if not r.empty:
+            for c in ("uv", "visit", "cust", "oc", "amt"):
+                r[c] = pd.to_numeric(r[c], errors="coerce")
+            r["chnl_norm"] = r["chnl"].astype(str).str.strip().str.lower()
+            has_total = r.groupby(["date", "af"])["chnl_norm"].transform(lambda x: (x == "total").any())
+            use = r[(~has_total) | (r["chnl_norm"] == "total")]
+            g = use.groupby(["date", "af"]).agg(uv=("uv", "sum"), visit=("visit", "sum"), cust=("cust", "sum"),
+                                                oc=("oc", "sum"), amt=("amt", "sum"))
+            perf_map = g.to_dict("index")
+
+    keys = list(zip(d["date"], d["af"].astype(str).str.strip()))
+    d["send"] = [send_map.get(k, np.nan) for k in keys]
+    for col in ("uv", "visit", "cust", "oc", "amt"):
+        d[col] = [(perf_map[k][col] if k in perf_map else np.nan) for k in keys]
+    d["infl_cr"] = np.where(pd.to_numeric(d["send"], errors="coerce").fillna(0) > 0,
+                            pd.to_numeric(d["uv"], errors="coerce") / pd.to_numeric(d["send"], errors="coerce"), np.nan)
+    d["ord_cr"] = np.where(pd.to_numeric(d["uv"], errors="coerce").fillna(0) > 0,
+                          pd.to_numeric(d["oc"], errors="coerce") / pd.to_numeric(d["uv"], errors="coerce"), np.nan)
+    return d
+
+
 def load_store():
     if os.path.exists(DATA_STORE):
         try:
@@ -771,12 +819,12 @@ def main():
                   "cust": "고객수", "oc": "주문건수", "amt": "거래액", "infl_cr": "유입전환율",
                   "ord_cr": "주문전환율", "eff": "효율"}
 
-    def store_column_config():
+    def store_column_config(disabled=()):
         cfg = {}
         for k, label in TXT_LABELS.items():
-            cfg[k] = st.column_config.TextColumn(label)
+            cfg[k] = st.column_config.TextColumn(label, disabled=(k in disabled))
         for k, label in NUM_LABELS.items():
-            cfg[k] = st.column_config.NumberColumn(label)
+            cfg[k] = st.column_config.NumberColumn(label, disabled=(k in disabled))
         return cfg
 
     # ── 저장소 백엔드: 구글시트(설정 시) ↔ 로컬 CSV(폴백) ──
@@ -1078,12 +1126,11 @@ def main():
     # ══════════════════════════════════════════════════════════
     elif page == "✍️ 직접 입력":
         st.title("직접 입력")
-        tab_raw, tab_final = st.tabs(["📋 발송 건수 + RawNew (자동 계산)", "🧮 최종 값 직접 입력"])
+        tab_raw, tab_final = st.tabs(["📋 발송 건수 + RawNew (조회용 원본)", "🧮 최종 값 직접 입력 (자동 조회)"])
 
         with tab_raw:
-            st.caption("엑셀의 **'발송 건수'**·**'RawNew'** 시트와 같은 원본 형태로 입력하면, 엑셀 업로드와 "
-                      "**완전히 같은 방식**(CHNL_DTL_CD='Total' 우선 등)으로 발송모수/UV/VISIT/고객수/주문건수/거래액을 "
-                      "자동 계산해서 저장해요. 두 표 모두 **AF코드**·**일자(YYYYMMDD)** 는 필수예요.")
+            st.caption("엑셀의 **'발송 건수'**·**'RawNew'** 시트와 같은 원본 형태로 입력해 두면, 옆 **'최종 값 직접 입력'** "
+                      "탭에서 일자+AF코드만 넣어도 여기 있는 내용을 바탕으로 자동 조회돼요. **따로 계산 버튼을 누를 필요 없어요.**")
             st.markdown("**발송 건수** (발송로그)")
             if "raw_send_ver" not in st.session_state:
                 st.session_state.raw_send_ver = 0
@@ -1125,54 +1172,49 @@ def main():
                     "amt": st.column_config.NumberColumn("ORD_AMT"),
                 }, key=f"raw_perf_editor_{st.session_state.raw_perf_ver}")
 
-            rb1, rb2 = st.columns(2)
-            if rb1.button("🧮 계산해서 저장하기", use_container_width=True, key="raw_calc_save"):
-                send_clean = clean_send_count_entry(send_edit)
-                perf_clean = clean_rawnew_entry(perf_edit)
-                if send_clean.empty and perf_clean.empty:
-                    st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
-                else:
-                    meta_lookup = build_af_meta_lookup(df) if not df.empty else {}
-                    derived = build_from_raw_query_sheets(send_clean, perf_clean, meta_lookup)
-                    clean = clean_manual_rows(derived)
-                    if clean.empty:
-                        st.warning("계산된 유효한 행이 없어요.")
-                    else:
-                        merged = merge_store(storage_load(BK), clean)
-                        storage_save(BK, merged)
-                        st.session_state.manual_prefill = clean[STORE_COLS].copy()
-                        st.session_state.manual_editor_ver = st.session_state.get("manual_editor_ver", 0) + 1
-                        st.success(f"{len(clean):,}건 계산·저장 완료 (누적 {len(merged):,}건) — "
-                                  "**'🧮 최종 값 직접 입력'** 탭에서 AF코드 기준으로 채워진 값을 확인·수정할 수 있어요.")
-                        show = clean.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU",
-                                                     "stype": "발송유형", "brand": "브랜드"})
-                        st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "visit", "cust",
-                                          "주문건수", "거래액"]].rename(columns={"visit": "VISIT", "cust": "고객수"}),
-                                    use_container_width=True, hide_index=True)
-            if rb2.button("↺ 두 표 비우기", use_container_width=True, key="raw_calc_clear"):
+            if st.button("↺ 두 표 비우기", key="raw_calc_clear"):
                 st.session_state.raw_send_ver += 1
                 st.session_state.raw_perf_ver += 1
                 st.rerun()
 
+        send_lookup = clean_send_count_entry(send_edit)
+        perf_lookup = clean_rawnew_entry(perf_edit)
+        AUTO_COLS = set(LOOKUP_METRIC_COLS)
+
         with tab_final:
-            st.caption("엑셀 업로드 없이 이 표에서 바로 최종 발송 실적 값을 입력하고 저장할 수 있어요. "
-                      "**AF코드**와 **일자(YYYYMMDD, 예: 20260706)** 는 필수예요. 행 추가는 표 맨 아래 + 를 누르면 돼요. "
-                      "'📋 발송 건수 + RawNew' 탭에서 **계산해서 저장하기**를 누르면 그 결과가 여기 자동으로 채워져요.")
+            st.caption("**AF코드**와 **일자(YYYYMMDD)** 만 입력하면 왼쪽 **'발송 건수 + RawNew'** 탭에 입력된 내용을 바탕으로 "
+                      "**발송모수/UV/VISIT/고객수/주문건수/거래액/유입전환율/주문전환율**이 엑셀의 SUMIFS 수식과 같은 방식으로 "
+                      "자동 조회돼요 (회색으로 비활성화된 컬럼). 행 추가는 표 맨 아래 + 를 누르면 돼요.")
             if "manual_editor_ver" not in st.session_state:
                 st.session_state.manual_editor_ver = 0
-            prefill = st.session_state.pop("manual_prefill", None)
-            initial_df = prefill if prefill is not None else blank_row_df()
-            edited = st.data_editor(initial_df, num_rows="dynamic", use_container_width=True, height=280,
-                                    column_config=store_column_config(), key=f"manual_editor_{st.session_state.manual_editor_ver}")
+            edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
+                                    column_config=store_column_config(disabled=AUTO_COLS),
+                                    key=f"manual_editor_{st.session_state.manual_editor_ver}")
+
+            meta_clean = clean_manual_rows(edited)
+            if meta_clean.empty:
+                st.info("AF코드와 일자를 입력하면 조회 결과가 여기 표시돼요.")
+            else:
+                looked_up = lookup_send_uv_etc(meta_clean, send_lookup, perf_lookup)
+                st.markdown("**🔎 자동 조회 결과** (저장하기를 누르면 이 값이 저장돼요)")
+                show = looked_up.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU", "stype": "발송유형",
+                                                 "brand": "브랜드", "visit": "VISIT", "cust": "고객수",
+                                                 "infl_cr": "유입전환율", "ord_cr": "주문전환율"})
+                st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "VISIT", "고객수",
+                                  "주문건수", "거래액", "유입전환율", "주문전환율"]].style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
+                    "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "유입전환율": "{:.2%}", "주문전환율": "{:.2%}",
+                }), use_container_width=True, hide_index=True)
+
             c1, c2 = st.columns(2)
             if c1.button("💾 저장하기", use_container_width=True):
-                clean = clean_manual_rows(edited)
-                if clean.empty:
+                if meta_clean.empty:
                     st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
                 else:
-                    merged = merge_store(storage_load(BK), clean)
+                    looked_up = lookup_send_uv_etc(meta_clean, send_lookup, perf_lookup)
+                    merged = merge_store(storage_load(BK), looked_up[STORE_COLS])
                     storage_save(BK, merged)
-                    st.success(f"{len(clean):,}건 저장 완료 (누적 {len(merged):,}건)")
+                    st.success(f"{len(looked_up):,}건 저장 완료 (누적 {len(merged):,}건)")
                     st.session_state.manual_editor_ver += 1
                     st.rerun()
             if c2.button("↺ 비우기", use_container_width=True):
