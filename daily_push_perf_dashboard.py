@@ -69,14 +69,20 @@ _ALL_CAND_NORMS = _cand_norms(COLMAP_CANDIDATES)
 
 
 def _norm_date(v):
-    """엑셀 셀 값 → 'YYYYMMDD' 문자열 또는 None. datetime/문자열/구분자/실수(.0) 형태 모두 허용."""
+    """엑셀 셀 값 → 'YYYYMMDD' 문자열 또는 None. datetime/문자열/구분자/실수(.0) 형태 모두 허용.
+    엑셀 날짜 셀을 표시형식 그대로 복사-붙여넣기하면 '26/06/29'처럼 2자리 연도로 들어오기도
+    해서(예: '발송일시' 컬럼), 6자리(YYMMDD)면 '20'을 붙여 8자리로 보정한다."""
     if v is None:
         return None
     if isinstance(v, (datetime.datetime, datetime.date)):
         return v.strftime("%Y%m%d")
     s = re.sub(r"\.0+$", "", str(v).strip())
     digits = re.sub(r"\D", "", s)
-    return digits if len(digits) == 8 else None
+    if len(digits) == 8:
+        return digits
+    if len(digits) == 6:
+        return "20" + digits
+    return None
 
 
 def _find_header_row(rows, candidates=None, max_scan=10, min_score=3):
@@ -1205,6 +1211,9 @@ def main():
             edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
                                     column_config=store_column_config(disabled=AUTO_LOOKUP_COLS),
                                     key=f"manual_editor_{st.session_state.manual_editor_ver}")
+
+            if st.button("🔄 새로고침 (발송 건수+RawNew 반영)", key="lookup_refresh"):
+                st.rerun()
 
             meta_clean = clean_manual_rows(edited)
             if meta_clean.empty:
