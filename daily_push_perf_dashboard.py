@@ -613,19 +613,28 @@ def clean_rawnew_entry(edited):
     return d[RAWNEW_ENTRY_COLS]
 
 
-LOOKUP_METRIC_COLS = ["send", "uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr"]
+LOOKUP_METRIC_COLS = ["send", "uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr", "eff"]
+# 자동 조회(비활성화)로 두는 컬럼 — 발송모수(send)는 직접 수정 가능하도록 제외한다.
+AUTO_LOOKUP_COLS = ["uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr", "eff"]
 
 
 def lookup_send_uv_etc(meta_df, send_log_df, rawnew_df):
     """메타데이터 표(날짜+AF코드 등)의 각 행에 대해 '발송 건수'/'RawNew' 표에서 (일자,AF코드) 기준으로
-    발송모수/UV/VISIT/고객수/주문건수/거래액을 찾아 채운다. 엑셀의
+    UV/VISIT/고객수/주문건수/거래액을 찾아 채운다. 엑셀의
     =SUMIFS(RawNew!UV, RawNew!일자, 일자, RawNew!AF코드, AF코드, RawNew!CHNL_DTL_CD,"Total") 와 동일한 방식
-    (일자+AF코드 합계, RawNew는 CHNL_DTL_CD='Total' 행이 있으면 그것만 사용). 유입전환율/주문전환율은
-    UV/발송, 주문건수/UV 비율로 계산한다. AF코드가 없거나 값을 못 찾으면 그대로 NaN으로 남긴다."""
+    (일자+AF코드 합계, RawNew는 CHNL_DTL_CD='Total' 행이 있으면 그것만 사용).
+
+    발송모수(send)는 meta_df에 직접 입력된 값이 있으면 그 값을 그대로 쓰고, 비어 있을 때만
+    '발송 건수' 표에서 조회해 채운다(직접 기입 우선).
+
+    유입전환율=UV/발송, 주문전환율=고객수/UV, 효율=거래액/발송 으로 계산한다
+    (모두 실제 소재별 실적 데이터를 역산해 확인한 공식). AF코드가 없거나 값을 못 찾으면 NaN으로 남긴다."""
     d = meta_df.copy()
-    for c in LOOKUP_METRIC_COLS:
+    manual_send = pd.to_numeric(d["send"], errors="coerce") if "send" in d.columns else pd.Series(np.nan, index=d.index)
+    for c in AUTO_LOOKUP_COLS:
         d[c] = np.nan
     if d.empty:
+        d["send"] = manual_send
         return d
 
     send_map = {}
@@ -651,13 +660,18 @@ def lookup_send_uv_etc(meta_df, send_log_df, rawnew_df):
             perf_map = g.to_dict("index")
 
     keys = list(zip(d["date"], d["af"].astype(str).str.strip()))
-    d["send"] = [send_map.get(k, np.nan) for k in keys]
+    looked_up_send = pd.Series([send_map.get(k, np.nan) for k in keys], index=d.index)
+    d["send"] = manual_send.where(manual_send.notna(), looked_up_send)
     for col in ("uv", "visit", "cust", "oc", "amt"):
         d[col] = [(perf_map[k][col] if k in perf_map else np.nan) for k in keys]
-    d["infl_cr"] = np.where(pd.to_numeric(d["send"], errors="coerce").fillna(0) > 0,
-                            pd.to_numeric(d["uv"], errors="coerce") / pd.to_numeric(d["send"], errors="coerce"), np.nan)
-    d["ord_cr"] = np.where(pd.to_numeric(d["uv"], errors="coerce").fillna(0) > 0,
-                          pd.to_numeric(d["oc"], errors="coerce") / pd.to_numeric(d["uv"], errors="coerce"), np.nan)
+
+    send_n = pd.to_numeric(d["send"], errors="coerce")
+    uv_n = pd.to_numeric(d["uv"], errors="coerce")
+    cust_n = pd.to_numeric(d["cust"], errors="coerce")
+    amt_n = pd.to_numeric(d["amt"], errors="coerce")
+    d["infl_cr"] = np.where(send_n.fillna(0) > 0, uv_n / send_n, np.nan)
+    d["ord_cr"] = np.where(uv_n.fillna(0) > 0, cust_n / uv_n, np.nan)
+    d["eff"] = np.where(send_n.fillna(0) > 0, amt_n / send_n, np.nan)
     return d
 
 
@@ -1179,16 +1193,17 @@ def main():
 
         send_lookup = clean_send_count_entry(send_edit)
         perf_lookup = clean_rawnew_entry(perf_edit)
-        AUTO_COLS = set(LOOKUP_METRIC_COLS)
 
         with tab_final:
-            st.caption("**AF코드**와 **일자(YYYYMMDD)** 만 입력하면 왼쪽 **'발송 건수 + RawNew'** 탭에 입력된 내용을 바탕으로 "
-                      "**발송모수/UV/VISIT/고객수/주문건수/거래액/유입전환율/주문전환율**이 엑셀의 SUMIFS 수식과 같은 방식으로 "
-                      "자동 조회돼요 (회색으로 비활성화된 컬럼). 행 추가는 표 맨 아래 + 를 누르면 돼요.")
+            st.caption("**AF코드**와 **일자(YYYYMMDD)** 를 입력하면 왼쪽 **'발송 건수 + RawNew'** 탭에 입력된 내용을 바탕으로 "
+                      "**UV/VISIT/고객수/주문건수/거래액**과 **유입전환율/주문전환율/효율**이 엑셀의 SUMIFS 수식과 같은 방식으로 "
+                      "자동 조회돼요 (회색으로 비활성화된 컬럼). **발송모수**는 직접 입력한 값이 있으면 그 값을 우선 쓰고, "
+                      "비워두면 '발송 건수' 표에서 자동 조회해요 — 값을 바꾸면 유입전환율/주문전환율/효율도 그에 맞게 다시 계산돼요. "
+                      "행 추가는 표 맨 아래 + 를 누르면 돼요.")
             if "manual_editor_ver" not in st.session_state:
                 st.session_state.manual_editor_ver = 0
             edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
-                                    column_config=store_column_config(disabled=AUTO_COLS),
+                                    column_config=store_column_config(disabled=AUTO_LOOKUP_COLS),
                                     key=f"manual_editor_{st.session_state.manual_editor_ver}")
 
             meta_clean = clean_manual_rows(edited)
@@ -1199,11 +1214,12 @@ def main():
                 st.markdown("**🔎 자동 조회 결과** (저장하기를 누르면 이 값이 저장돼요)")
                 show = looked_up.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU", "stype": "발송유형",
                                                  "brand": "브랜드", "visit": "VISIT", "cust": "고객수",
-                                                 "infl_cr": "유입전환율", "ord_cr": "주문전환율"})
+                                                 "infl_cr": "유입전환율", "ord_cr": "주문전환율", "eff": "효율"})
                 st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "VISIT", "고객수",
-                                  "주문건수", "거래액", "유입전환율", "주문전환율"]].style.format({
+                                  "주문건수", "거래액", "유입전환율", "주문전환율", "효율"]].style.format({
                     "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
                     "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "유입전환율": "{:.2%}", "주문전환율": "{:.2%}",
+                    "효율": "{:,.2f}",
                 }), use_container_width=True, hide_index=True)
 
             c1, c2 = st.columns(2)
