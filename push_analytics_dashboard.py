@@ -323,8 +323,12 @@ def _copy_type(title: str, body: str) -> str:
 
 def tag_copy(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    title = df.get("title", pd.Series([""] * len(df))).fillna("").astype(str)
-    body  = df.get("body",  pd.Series([""] * len(df))).fillna("").astype(str)
+    for _c in ("title", "body"):
+        if _c not in df:
+            df[_c] = ""
+        df[_c] = df[_c].fillna("").astype(str)
+    title = df["title"]
+    body  = df["body"]
     combined = title + " " + body
 
     df["has_emoji"]    = combined.apply(lambda s: _count_emoji(s) > 0)
@@ -632,11 +636,13 @@ def tab_copy_analysis(df: pd.DataFrame):
 
     # ── 상위 10 문구 테이블 (CTR 컬러 그라데이션)
     _section("CTR 상위 10개 문구", "🏆")
+    _top10_want = ["send_id", "bpu", "title", "body", "copy_type", "send_cnt", "ctr", "cvr", "gmv"]
+    _top10_cols = [c for c in _top10_want if c in df.columns]
     top10 = (
         df[df["send_cnt"] >= df["send_cnt"].quantile(.25)]  # 소량 발송 제외
         .sort_values("ctr", ascending=False)
         .head(10)
-        [["send_id", "bpu", "title", "body", "copy_type", "send_cnt", "ctr", "cvr", "gmv"]]
+        [_top10_cols]
         .copy()
         .rename(columns={
             "send_id": "발송ID", "bpu": "BPU", "title": "타이틀", "body": "본문",
