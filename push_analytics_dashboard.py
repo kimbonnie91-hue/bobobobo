@@ -64,9 +64,12 @@ HOUR_BANDS = {
 MSG_COLMAP = {
     "발송ID": "send_id", "발송 ID": "send_id",
     "발송일시": "send_dt", "발송 일시": "send_dt", "날짜": "send_dt", "일시": "send_dt",
+    "발송일자": "send_dt", "발송 일자": "send_dt", "일자": "send_dt",
+    "발송시간": "send_time", "발송 시간": "send_time", "시간": "send_time",
+    "발송주차": "send_week", "주차": "send_week",
     "BPU": "bpu", "사업부": "bpu", "브랜드": "bpu",
-    "푸시타이틀": "title", "타이틀": "title", "제목": "title",
-    "푸시본문": "body", "본문": "body", "내용": "body",
+    "푸시타이틀": "title", "타이틀": "title", "제목": "title", "문구": "title", "푸시문구": "title",
+    "푸시본문": "body", "본문": "body", "내용": "body", "본문내용": "body",
     "타겟조건": "target", "타겟 조건": "target", "타겟": "target",
     "발송채널": "channel", "채널": "channel",
 }
@@ -158,11 +161,51 @@ def parse_perf_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.Dat
     return _finalize_perf(df)
 
 
+def _parse_hour_min(t: str):
+    """'14:30', '14시30분', '14시', '1430' 형식에서 (hour, minute) 반환."""
+    t = str(t).strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})$", t)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.match(r"^(\d{1,2})시(?:(\d{1,2})분)?$", t)
+    if m:
+        return int(m.group(1)), int(m.group(2) or 0)
+    m = re.match(r"^(\d{3,4})$", t)
+    if m:
+        v = int(m.group(1))
+        return v // 100, v % 100
+    return None, None
+
+
 def _finalize_msg(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.copy()
-    df["send_dt"] = pd.to_datetime(df.get("send_dt"), errors="coerce")
+
+    # 발송주차 메타 보존
+    if "send_week" in df.columns:
+        df["send_week"] = df["send_week"].fillna("").astype(str).str.strip()
+
+    # 발송시간(시간만)이 별도 컬럼으로 있을 때 발송일자와 합산
+    date_part = pd.to_datetime(df.get("send_dt"), errors="coerce")
+    if "send_time" in df.columns and df["send_time"].notna().any():
+        combined = []
+        for d, t in zip(date_part, df["send_time"].fillna("").astype(str)):
+            if pd.isna(d):
+                combined.append(pd.NaT)
+                continue
+            h, mn = _parse_hour_min(t)
+            if h is not None:
+                try:
+                    combined.append(d.replace(hour=h, minute=mn, second=0))
+                except Exception:
+                    combined.append(d)
+            else:
+                combined.append(d)
+        df["send_dt"] = combined
+    else:
+        df["send_dt"] = date_part
+
     for c in ("title", "body", "bpu", "target", "channel"):
         if c not in df:
             df[c] = ""
@@ -1074,6 +1117,46 @@ def _gs_creds():
         return None
 
 
+def load_msg_from_gsheet(spreadsheet_url: str):
+    """구글시트 URL → (msg_df, debug_info). 문구·메시지 데이터만 로드.
+    발송주차·발송일자·발송시간·문구 등을 인식한다."""
+    debug_info = []
+    try:
+        import gspread
+        creds = _gs_creds()
+        if creds is None:
+            st.error("Streamlit Secrets에 [gcp_service_account] 설정이 없습니다.")
+            return None, []
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_url(spreadsheet_url)
+        msg_df = None
+        for ws in sh.worksheets():
+            try:
+                rows = ws.get_all_values()
+            except Exception:
+                debug_info.append((ws.title, "(읽기 오류 — 건너뜀)", "skip"))
+                continue
+            if not rows:
+                debug_info.append((ws.title, "(빈 시트)", "empty"))
+                continue
+            hdr = [str(c).strip() for c in rows[0]]
+            hdr_preview = ", ".join(hdr[:10])
+            matched = sum(1 for h in hdr if h in MSG_COLMAP)
+            if matched >= 2:
+                parsed = _finalize_msg(_parse_sheet_df(rows, MSG_COLMAP))
+                if not parsed.empty:
+                    msg_df = parsed
+                    debug_info.append((ws.title, hdr_preview, f"✅ 문구 ({len(parsed)}행)"))
+                else:
+                    debug_info.append((ws.title, hdr_preview, "— 파싱 결과 없음"))
+            else:
+                debug_info.append((ws.title, hdr_preview, f"— 매칭 컬럼 부족({matched}개)"))
+        return msg_df, debug_info
+    except Exception as e:
+        st.error(f"Google Sheets 연동 오류: {e}")
+        return None, debug_info
+
+
 def load_from_gsheet(spreadsheet_url: str):
     """구글시트 URL → (msg_df, perf_df, debug_info).
     읽을 수 없는 시트(session_embeddings 등)는 건너뛰고 계속 진행."""
@@ -1147,16 +1230,88 @@ def main():
     )
 
     # ══ 사이드바: 데이터 입력 ══════════════════════════════════════════════
+    # 세션 상태 초기화
+    for _k in ("cached_df", "cached_mode"):
+        if _k not in st.session_state:
+            st.session_state[_k] = None
+
     with st.sidebar:
         st.markdown("### 📂 데이터 입력")
         input_mode = st.radio(
-            "입력 방식", ["📄 엑셀 파일 업로드", "🔗 Google Sheets 연동", "🧪 샘플 데이터로 체험"],
+            "입력 방식",
+            [
+                "🔗+📄 구글시트(문구) + 엑셀(실적)",
+                "📄 엑셀 파일 업로드",
+                "🔗 Google Sheets 연동",
+                "🧪 샘플 데이터로 체험",
+            ],
             label_visibility="collapsed",
         )
+        # 모드가 바뀌면 캐시 초기화
+        if st.session_state.get("cached_mode") != input_mode:
+            st.session_state.cached_df = None
+            st.session_state.cached_mode = None
 
         df_raw = None
 
-        if input_mode == "📄 엑셀 파일 업로드":
+        # ── 하이브리드: 구글시트(문구) + 엑셀(실적) ────────────────────────
+        if input_mode == "🔗+📄 구글시트(문구) + 엑셀(실적)":
+            st.markdown("**① 문구 데이터 — Google Sheets**")
+            st.caption("발송주차·발송일자·발송시간·문구 등이 담긴 시트 URL")
+            gs_url_h = st.text_input(
+                "스프레드시트 URL",
+                placeholder="https://docs.google.com/spreadsheets/d/…",
+                key="gs_url_hybrid",
+            )
+            st.markdown("**② 발송 실적 — 엑셀 파일**")
+            perf_file_h = st.file_uploader(
+                "실적 데이터 (발송량·오픈·GMV 포함)",
+                type=["xlsx", "xls"],
+                key="perf_upload_hybrid",
+            )
+
+            if gs_url_h and perf_file_h:
+                if st.button("분석 시작", type="primary", key="btn_hybrid"):
+                    with st.spinner("구글시트 & 실적 파일 로드 중…"):
+                        msg_df_h, dbg_h = load_msg_from_gsheet(gs_url_h)
+                        try:
+                            perf_df_h = parse_perf_bytes(perf_file_h.read())
+                        except Exception as _e:
+                            st.error(f"실적 파일 오류: {_e}")
+                            perf_df_h = pd.DataFrame()
+                    if not perf_df_h.empty:
+                        _merged = (
+                            merge_msg_perf(msg_df_h, perf_df_h)
+                            if (msg_df_h is not None and not msg_df_h.empty)
+                            else tag_copy(perf_df_h)
+                        )
+                        st.session_state.cached_df   = _merged
+                        st.session_state.cached_mode = input_mode
+                        st.success(f"✅ 병합 완료 — {len(_merged):,}건")
+                    else:
+                        st.error("실적 파일에서 데이터를 인식하지 못했습니다.")
+                    if dbg_h:
+                        with st.expander("🔍 구글시트 감지 결과"):
+                            for _nm, _hdr, _res in dbg_h:
+                                st.markdown(f"**{_nm}** ({_res})  \n`{_hdr}`")
+                        if not any("✅" in r for _, _, r in dbg_h):
+                            st.info(
+                                "문구 시트 헤더에 **발송주차, 발송일자, 발송시간, 문구** 등의 "
+                                "컬럼명이 있어야 합니다.  \n"
+                                "위 감지 결과에서 실제 컬럼명을 확인 후 알려주시면 매핑을 추가해드립니다."
+                            )
+
+            elif not gs_url_h:
+                st.info("구글시트 URL을 입력하세요.")
+            elif not perf_file_h:
+                st.info("실적 엑셀 파일을 업로드하세요.")
+
+            # 버튼 클릭 후 캐시된 데이터 재사용
+            if st.session_state.get("cached_mode") == input_mode and st.session_state.get("cached_df") is not None:
+                df_raw = st.session_state.cached_df
+
+        # ── 엑셀 파일 업로드 ────────────────────────────────────────────────
+        elif input_mode == "📄 엑셀 파일 업로드":
             st.markdown("**문구 데이터 파일**")
             msg_file = st.file_uploader("푸시 문구 (타이틀·본문·BPU 포함)", type=["xlsx", "xls"],
                                          key="msg_upload")
@@ -1169,8 +1324,8 @@ def main():
                     msg_df  = parse_msg_bytes(msg_file.read())
                     perf_df = parse_perf_bytes(perf_file.read())
                     if msg_df.empty or "send_id" not in msg_df.columns:
-                        st.warning("⚠️ 문구 파일에서 '발송ID' 등 인식 가능한 헤더를 찾지 못했어요. "
-                                   "문구 없이 실적 데이터만으로 분석을 진행합니다.")
+                        st.warning("⚠️ 문구 파일에서 인식 가능한 헤더를 찾지 못했어요. "
+                                   "실적 데이터만으로 분석을 진행합니다.")
                     df_raw  = merge_msg_perf(msg_df, perf_df)
                     st.success(f"✅ 병합 완료 — {len(df_raw):,}건")
                 except Exception as e:
@@ -1178,7 +1333,6 @@ def main():
             elif msg_file and not perf_file:
                 st.info("📋 실적 파일도 업로드하면 성과 분석이 가능합니다.")
             elif perf_file and not msg_file:
-                # 실적만 있을 때도 동작
                 try:
                     perf_df = parse_perf_bytes(perf_file.read())
                     df_raw  = tag_copy(perf_df)
@@ -1186,16 +1340,20 @@ def main():
                 except Exception as e:
                     st.error(f"파일 파싱 오류: {e}")
 
+        # ── Google Sheets 연동 (문구+실적 모두 시트에 있는 경우) ────────────
         elif input_mode == "🔗 Google Sheets 연동":
             gs_url = st.text_input("스프레드시트 URL",
-                                    placeholder="https://docs.google.com/spreadsheets/d/…")
-            if st.button("연동 시작", type="primary") and gs_url:
+                                    placeholder="https://docs.google.com/spreadsheets/d/…",
+                                    key="gs_url_full")
+            if st.button("연동 시작", type="primary", key="btn_gs_full") and gs_url:
                 with st.spinner("Google Sheets 읽는 중…"):
                     msg_df, perf_df, debug_info = load_from_gsheet(gs_url)
                 if perf_df is not None and not perf_df.empty:
-                    df_raw = merge_msg_perf(msg_df, perf_df) if (msg_df is not None and not msg_df.empty) \
-                             else tag_copy(perf_df)
-                    st.success(f"✅ 연동 완료 — {len(df_raw):,}건")
+                    _merged = merge_msg_perf(msg_df, perf_df) if (msg_df is not None and not msg_df.empty) \
+                              else tag_copy(perf_df)
+                    st.session_state.cached_df   = _merged
+                    st.session_state.cached_mode = input_mode
+                    st.success(f"✅ 연동 완료 — {len(_merged):,}건")
                 else:
                     st.error("실적 데이터를 인식하지 못했습니다.")
                     if debug_info:
@@ -1206,8 +1364,11 @@ def main():
                             "실적 시트 헤더에 **발송건수, 오픈건수, 거래액** 등의 컬럼명이 있어야 합니다.  \n"
                             "위 감지 결과에서 실제 컬럼명을 확인 후 알려주시면 매핑을 추가해드립니다."
                         )
+            if st.session_state.get("cached_mode") == input_mode and st.session_state.get("cached_df") is not None:
+                df_raw = st.session_state.cached_df
 
-        else:  # 샘플 데이터
+        # ── 샘플 데이터 ─────────────────────────────────────────────────────
+        else:
             df_raw = _make_sample_data()
             st.info(f"🧪 샘플 데이터 {len(df_raw):,}건 (200건·6BPU·180일)")
 
