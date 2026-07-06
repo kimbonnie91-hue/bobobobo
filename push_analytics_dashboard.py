@@ -105,53 +105,55 @@ def _parse_sheet_df(ws_rows: list, colmap: dict) -> pd.DataFrame:
     return pd.DataFrame(recs)
 
 
+def _load_all_sheets(file_bytes: bytes) -> dict:
+    """xlsx(openpyxl) 또는 xls(xlrd) 양쪽 포맷을 자동 감지해 {시트명: [[row]...]} 반환."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+        result = {name: list(wb[name].iter_rows(values_only=True)) for name in wb.sheetnames}
+        wb.close()
+        return result
+    except Exception as e:
+        if "zip" not in str(e).lower():
+            raise  # zip 관련 오류가 아니면 그대로 재발생
+    # .xls(Excel 97-2003) 폴백
+    import xlrd
+    wb = xlrd.open_workbook(file_contents=file_bytes)
+    result = {}
+    for sh in wb.sheets():
+        result[sh.name] = [tuple(sh.row_values(r)) for r in range(sh.nrows)]
+    return result
+
+
+def _pick_sheet(sheets: dict, priority_keywords: list) -> list:
+    """헤더에 priority_keywords가 포함된 시트를 우선 선택, 없으면 첫 번째 시트 반환."""
+    for name, rows in sheets.items():
+        if not rows:
+            continue
+        hdr = [str(v).strip() if v else "" for v in rows[0]]
+        if any(kw in hdr for kw in priority_keywords):
+            return rows
+    return next(iter(sheets.values()), [])
+
+
 def parse_msg_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.DataFrame:
-    """문구 엑셀 → DataFrame."""
-    import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-    # 시트 선택 전략
-    target = None
-    if sheet_name and sheet_name in wb.sheetnames:
-        target = sheet_name
+    """문구 엑셀(xlsx/xls) → DataFrame."""
+    sheets = _load_all_sheets(file_bytes)
+    if sheet_name and sheet_name in sheets:
+        rows = sheets[sheet_name]
     else:
-        for s in wb.sheetnames:
-            ws = wb[s]
-            hdr = [str(v).strip() if v else "" for v in
-                   next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
-            if any(h in MSG_COLMAP for h in hdr):
-                if "타이틀" in hdr or "제목" in hdr or "본문" in hdr or "내용" in hdr:
-                    target = s
-                    break
-    if target is None and wb.sheetnames:
-        target = wb.sheetnames[0]
-    ws = wb[target]
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
+        rows = _pick_sheet(sheets, ["타이틀", "제목", "본문", "내용", "푸시타이틀", "푸시본문"])
     df = _parse_sheet_df(rows, MSG_COLMAP)
     return _finalize_msg(df)
 
 
 def parse_perf_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.DataFrame:
-    """실적 엑셀 → DataFrame."""
-    import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-    target = None
-    if sheet_name and sheet_name in wb.sheetnames:
-        target = sheet_name
+    """실적 엑셀(xlsx/xls) → DataFrame."""
+    sheets = _load_all_sheets(file_bytes)
+    if sheet_name and sheet_name in sheets:
+        rows = sheets[sheet_name]
     else:
-        for s in wb.sheetnames:
-            ws = wb[s]
-            hdr = [str(v).strip() if v else "" for v in
-                   next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
-            if any(h in PERF_COLMAP for h in hdr):
-                if any(h in ("발송건수", "발송", "발송량", "오픈건수", "거래액", "GMV") for h in hdr):
-                    target = s
-                    break
-    if target is None and wb.sheetnames:
-        target = wb.sheetnames[0]
-    ws = wb[target]
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
+        rows = _pick_sheet(sheets, ["발송건수", "발송", "발송량", "오픈건수", "거래액", "GMV"])
     df = _parse_sheet_df(rows, PERF_COLMAP)
     return _finalize_perf(df)
 
