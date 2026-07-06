@@ -2,9 +2,12 @@
 """
 일일 PUSH 발송성과 대시보드
 ─────────────────────────────────────────────────────────────
-쿼리로 추출해 매일 갱신하는 "일일 PUSH 실적.xlsx"(누적_소재별 / 소재별 실적(당주)_2 시트)를
-업로드하면 AF코드 기준으로 발송모수/UV/주문건수/거래액을 집계해 시각화한다.
+쿼리로 추출해 매일 갱신하는 "일일 PUSH 실적.xlsx"를 업로드하면 AF코드 기준으로
+발송모수/UV/주문건수/거래액을 집계해 시각화한다.
 
+· 이미 집계된 '누적_소재별'/'소재별 실적(당주)_N' 시트를 우선 읽고, 그 시트가 없거나 거기 없는
+  일자·AF코드는 '발송 건수'+'RawNew' 원본 쿼리 시트에서 직접 (일자+AF코드) 단위로 집계해 채운다
+  — 즉 쿼리 결과만 두 시트에 그대로 붙여넣고 올려도 동작한다.
 · BPU별 실적, 발송유형별(기본/우수) 실적, 주차별 누적 추이는 "BPU별 실적"/"발송유형별 실적"
   피벗 시트를 그대로 읽지 않고, 소재별 실적 원본 로우 데이터에서 매번 다시 집계한다.
   (원본 피벗 시트의 셀 레이아웃이 바뀌어도 항상 정확한 값을 보장하기 위함)
@@ -56,35 +59,44 @@ COLMAP_CANDIDATES = {
 }
 NUM_COLS = ["prio", "hour", "send", "uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr", "eff"]
 TXT_COLS = ["dow_k", "target", "stype", "bpu", "cat", "attr", "owner", "brand", "promo"]
-_ALL_CAND_NORMS = {_norm_h(c) for cands in COLMAP_CANDIDATES.values() for c in cands}
+
+
+def _cand_norms(candidates):
+    return {_norm_h(c) for cands in candidates.values() for c in cands}
+
+
+_ALL_CAND_NORMS = _cand_norms(COLMAP_CANDIDATES)
 
 
 def _norm_date(v):
-    """엑셀 셀 값 → 'YYYYMMDD' 문자열 또는 None. datetime/문자열/구분자 포함 문자열 모두 허용."""
+    """엑셀 셀 값 → 'YYYYMMDD' 문자열 또는 None. datetime/문자열/구분자/실수(.0) 형태 모두 허용."""
     if v is None:
         return None
     if isinstance(v, (datetime.datetime, datetime.date)):
         return v.strftime("%Y%m%d")
-    digits = re.sub(r"\D", "", str(v).strip())
+    s = re.sub(r"\.0+$", "", str(v).strip())
+    digits = re.sub(r"\D", "", s)
     return digits if len(digits) == 8 else None
 
 
-def _find_header_row(rows, max_scan=10, min_score=3):
-    """rows 앞부분에서 COLMAP 후보와 가장 많이 일치하는 행을 헤더로 판정."""
+def _find_header_row(rows, candidates=None, max_scan=10, min_score=3):
+    """rows 앞부분에서 candidates(기본 COLMAP_CANDIDATES)와 가장 많이 일치하는 행을 헤더로 판정."""
+    norms = _ALL_CAND_NORMS if candidates is None else _cand_norms(candidates)
     best_i, best_score = None, min_score - 1
     for i, row in enumerate(rows[:max_scan]):
         cells = [_norm_h(v) for v in (row or [])]
-        score = sum(1 for c in cells if c and c in _ALL_CAND_NORMS)
+        score = sum(1 for c in cells if c and c in norms)
         if score > best_score:
             best_score, best_i = score, i
     return best_i
 
 
-def _map_columns(header_cells):
+def _map_columns(header_cells, candidates=None):
     """헤더 셀 리스트 → {표준키: 열 인덱스}."""
+    candidates = COLMAP_CANDIDATES if candidates is None else candidates
     normed = [_norm_h(c) for c in header_cells]
     idx = {}
-    for key, cands in COLMAP_CANDIDATES.items():
+    for key, cands in candidates.items():
         for cand in cands:
             cn = _norm_h(cand)
             if cn in normed:
@@ -121,6 +133,227 @@ def parse_material_rows(rows):
     return pd.DataFrame(recs)
 
 
+# ── '발송 건수'/'RawNew' 원본 쿼리 시트 → AF코드 기준 자동 집계 ──────────────
+# '소재별 실적(당주)' 류 시트가 아직 없어도, 매일 쿼리로 뽑아 붙여넣는 이 두 원본
+# 시트만으로 (일자+AF코드) 단위 발송모수/UV/VISIT/고객수/주문건수/거래액을 만든다.
+SEND_COUNT_CANDIDATES = {
+    "sendtime": ["발송일시"],
+    "camp_name": ["캠페인명"],
+    "channel": ["발송채널"],
+    "af": ["AF코드"],
+    "camp_type": ["캠페인구분"],
+    "send": ["모수"],
+}
+RAWNEW_CANDIDATES = {
+    "std_dd": ["STD_DD"],
+    "af": ["AF_CD"],
+    "af_nm": ["AF_NM"],
+    "chnl": ["CHNL_DTL_CD"],
+    "uv": ["UV"],
+    "visit": ["SV"],
+    "cust": ["CUST_CNT"],
+    "oc": ["ORD_CNT"],
+    "amt": ["ORD_AMT"],
+}
+# '기획' 발송의 캠페인명은 "REAL_20260629_0800_기본발송_편성_112512" 형태(시간대_발송유형_BPU_기획전No)로
+# 템플릿화되어 있어 브랜드명이 아니다 — 이 패턴이 매칭되면 브랜드로 쓰지 않고 메타로만 활용한다.
+_CAMPNAME_RE = re.compile(r"^[^_]+_(\d{8})_(\d{3,4})_([^_]+)_([^_]+)_(\d+)$")
+
+
+def parse_send_count_rows(rows):
+    """'발송 건수' 원본 쿼리 시트(발송 로그 1건=1행) → (일자, AF코드, 캠페인명, 모수) 레코드."""
+    if not rows:
+        return pd.DataFrame()
+    hdr_i = _find_header_row(rows, candidates=SEND_COUNT_CANDIDATES, min_score=2)
+    if hdr_i is None:
+        return pd.DataFrame()
+    header = [("" if v is None else str(v)) for v in rows[hdr_i]]
+    idx = _map_columns(header, candidates=SEND_COUNT_CANDIDATES)
+    if "af" not in idx or "send" not in idx:
+        return pd.DataFrame()
+    recs = []
+    for row in rows[hdr_i + 1:]:
+        if row is None:
+            continue
+        n = len(row)
+        af_i = idx["af"]
+        af = row[af_i] if af_i < n else None
+        af = "" if af is None else str(af).strip()
+        if not af:
+            continue
+        rec = {key: (row[i] if i < n else None) for key, i in idx.items()}
+        rec["af"] = af
+        rec["date"] = _norm_date(rec.get("sendtime"))
+        recs.append(rec)
+    return pd.DataFrame(recs)
+
+
+def parse_rawnew_rows(rows):
+    """'RawNew' 원본 쿼리 시트(전사 채널 성과 원자료) → (일자, AF코드)별 UV/VISIT/고객수/주문건수/거래액 원자료.
+
+    CHNL_DTL_CD가 여러 세부채널(A/M 등)로 쪼개져 있고 'Total' 행이 있으면 그 행만 써야
+    중복 합산을 피한다 (Total 없는 그룹은 세부채널을 그대로 합산)."""
+    if not rows:
+        return pd.DataFrame()
+    hdr_i = _find_header_row(rows, candidates=RAWNEW_CANDIDATES, min_score=3)
+    if hdr_i is None:
+        return pd.DataFrame()
+    header = [("" if v is None else str(v)) for v in rows[hdr_i]]
+    idx = _map_columns(header, candidates=RAWNEW_CANDIDATES)
+    if "af" not in idx or "std_dd" not in idx:
+        return pd.DataFrame()
+    recs = []
+    for row in rows[hdr_i + 1:]:
+        if row is None:
+            continue
+        n = len(row)
+        af_i = idx["af"]
+        af = row[af_i] if af_i < n else None
+        af = "" if af is None else str(af).strip()
+        if not af:
+            continue
+        date = _norm_date(row[idx["std_dd"]] if idx["std_dd"] < n else None)
+        if date is None:
+            continue
+        rec = {key: (row[i] if i < n else None) for key, i in idx.items()}
+        rec["af"] = af
+        rec["date"] = date
+        rec["chnl"] = "" if rec.get("chnl") is None else str(rec["chnl"]).strip()
+        recs.append(rec)
+    return pd.DataFrame(recs)
+
+
+def build_af_meta_lookup(df):
+    """기존 소재별 실적 데이터 → AF코드별 최근 메타데이터(BPU/발송유형/카테고리/속성/담당자/
+    브랜드/기획전/타겟구분/시간대) 사전. '발송 건수'+'RawNew'만으로는 알 수 없는 항목을 채우는 용도."""
+    if df is None or df.empty:
+        return {}
+    d = df.sort_values("date") if "date" in df.columns else df
+    lookup = {}
+    for _, r in d.iterrows():
+        af = str(r.get("af", "") or "").strip()
+        if not af:
+            continue
+        lookup[af] = {k: (r.get(k) or "") for k in
+                      ("bpu", "stype", "cat", "attr", "owner", "brand", "promo", "target", "hour")}
+    return lookup
+
+
+def _parse_campname_meta(name):
+    """'REAL_20260629_0800_기본발송_편성_112512' → {hour, stype, bpu, promo}. 매칭 안 되면 {}."""
+    if not name:
+        return {}
+    m = _CAMPNAME_RE.match(str(name).strip())
+    if not m:
+        return {}
+    return {"hour": m.group(2), "stype": m.group(3), "bpu": m.group(4), "promo": m.group(5)}
+
+
+_DOW_K = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def build_from_raw_query_sheets(send_count_raw, rawnew_raw, meta_lookup=None):
+    """'발송 건수'(발송로그) + 'RawNew'(성과 원자료) → (일자+AF코드) 단위 소재별 실적 행.
+
+    meta_lookup: build_af_meta_lookup()의 결과 — 같은 통합문서의 기존 소재별 실적류 시트에서
+    뽑은 AF코드→메타데이터. 없으면 캠페인명 패턴 인식 결과만으로 채우고 나머지는 빈 값."""
+    meta_lookup = meta_lookup or {}
+    has_send = send_count_raw is not None and not send_count_raw.empty
+    has_perf = rawnew_raw is not None and not rawnew_raw.empty
+    if not has_send and not has_perf:
+        return pd.DataFrame()
+
+    send_agg = pd.DataFrame(columns=["date", "af", "send", "camp_name"])
+    if has_send:
+        s = send_count_raw.dropna(subset=["date"]).copy()
+        s["send"] = pd.to_numeric(s["send"], errors="coerce")
+        send_agg = s.groupby(["date", "af"], as_index=False).agg(send=("send", "sum"), camp_name=("camp_name", "first"))
+
+    perf_agg = pd.DataFrame(columns=["date", "af", "uv", "visit", "cust", "oc", "amt"])
+    if has_perf:
+        r = rawnew_raw.copy()
+        for c in ("uv", "visit", "cust", "oc", "amt"):
+            r[c] = pd.to_numeric(r[c], errors="coerce")
+        r["chnl_norm"] = r["chnl"].astype(str).str.strip().str.lower()
+        has_total = r.groupby(["date", "af"])["chnl_norm"].transform(lambda s: (s == "total").any())
+        use = r[(~has_total) | (r["chnl_norm"] == "total")]
+        perf_agg = use.groupby(["date", "af"], as_index=False).agg(
+            uv=("uv", "sum"), visit=("visit", "sum"), cust=("cust", "sum"), oc=("oc", "sum"), amt=("amt", "sum"))
+
+    if has_send:
+        # '발송 건수'에 실제 발송 기록이 있는 (일자,AF코드)만 남긴다 — RawNew는 전사 전 채널
+        # 원자료라 그날 발송이 없어도 잔여 귀속 클릭/주문이 잡힐 수 있어 노이즈가 된다.
+        merged = pd.merge(send_agg, perf_agg, on=["date", "af"], how="left")
+    else:
+        merged = perf_agg.copy()
+    if merged.empty:
+        return merged
+    for c in ("send", "uv", "visit", "cust", "oc", "amt"):
+        if c not in merged.columns:
+            merged[c] = np.nan
+    if "camp_name" not in merged.columns:
+        merged["camp_name"] = None
+
+    rows = []
+    for _, r in merged.iterrows():
+        af = r["af"]
+        meta = meta_lookup.get(af, {})
+        parsed = _parse_campname_meta(r.get("camp_name"))
+        dt = pd.to_datetime(r["date"], format="%Y%m%d", errors="coerce")
+        brand = meta.get("brand", "") if parsed else (r.get("camp_name") or meta.get("brand", ""))
+        rec = {c: None for c in STORE_COLS}
+        rec.update({
+            "date": r["date"], "af": af,
+            "dow_k": _DOW_K[dt.dayofweek] if pd.notna(dt) else "",
+            "hour": parsed.get("hour") or meta.get("hour", ""),
+            "stype": parsed.get("stype") or meta.get("stype", ""),
+            "bpu": parsed.get("bpu") or meta.get("bpu", ""),
+            "promo": parsed.get("promo") or meta.get("promo", ""),
+            "brand": brand or "",
+            "cat": meta.get("cat", ""), "attr": meta.get("attr", ""),
+            "owner": meta.get("owner", ""), "target": meta.get("target", ""),
+            "send": r.get("send"), "uv": r.get("uv"), "visit": r.get("visit"),
+            "cust": r.get("cust"), "oc": r.get("oc"), "amt": r.get("amt"),
+        })
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
+def discover_raw_query_sheets(sheetnames):
+    """워크북 시트명 목록 → ('발송 건수' 시트명, 'RawNew' 후보 시트명 리스트). 이름에 trailing space 등
+    표기가 흔들려도(정규화 시 동일해짐) 후보를 모두 모아 두고, 여러 개면 날짜가 최신인 것을 고른다."""
+    send_cnt = None
+    rawnew_candidates = []
+    for s in sheetnames:
+        sn = _norm_h(s)
+        if sn == "발송건수":
+            send_cnt = send_cnt or s
+        elif sn.lower() == "rawnew":
+            rawnew_candidates.append(s)
+    return send_cnt, rawnew_candidates
+
+
+def _peek_max_date(wb, sheet_name, candidates, sample=1000):
+    """시트 전체를 다 읽지 않고 앞부분 표본만으로 대략적인 최신 날짜를 추정
+    (동일 이름의 여러 후보 시트 중 '최신 데이터가 든 것'을 빠르게 골라내기 위함)."""
+    ws = wb[sheet_name]
+    header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header:
+        return None
+    idx = _map_columns([("" if v is None else str(v)) for v in header], candidates=candidates)
+    date_key = "std_dd" if "std_dd" in idx else ("sendtime" if "sendtime" in idx else None)
+    if date_key is None:
+        return None
+    ci = idx[date_key]
+    best = None
+    for row in ws.iter_rows(min_row=2, max_row=1 + sample, values_only=True):
+        if ci < len(row):
+            d = _norm_date(row[ci])
+            if d and (best is None or d > best):
+                best = d
+    return best
+
+
 def discover_perf_sheets(sheetnames):
     """워크북 시트명 목록 → (누적_소재별 시트명, 소재별 실적(당주) 시트명). 없으면 None."""
     cum = week = None
@@ -136,25 +369,29 @@ def discover_perf_sheets(sheetnames):
 def load_excel_perf(file_bytes):
     """업로드 엑셀 바이트 → (합쳐진 DataFrame, 실제로 읽은 시트명 리스트).
 
-    우선 '누적_소재별'과 '소재별 실적(당주)_*' 시트를 찾아 읽는다.
-    둘 다 없으면 전체 시트를 훑어 AF코드+발송/거래액 헤더가 있는 시트를 폴백으로 사용한다.
-    (발송 건수/RawNew 같은 원본 쿼리 덤프 시트는 이미 소재별 실적 시트로 집계되어 있으므로 읽지 않는다.)
+    소스는 두 종류이고, 겹치면(같은 일자+AF코드) 사전 집계 시트 쪽 값을 우선한다:
+    1) '누적_소재별' / '소재별 실적(당주)_*' — 이미 다 만들어진 소재별 실적(사전 집계, 우선순위 높음)
+    2) '발송 건수' + 'RawNew' — 매일 쿼리로 붙여넣는 원본 로그. 소재별 실적 시트가 아직 없거나
+       그 시트에 없는 일자+AF코드가 있으면, 이 두 시트만으로 직접 집계해서 채운다.
+       (동명의 'RawNew' 시트가 여러 개면 표본을 훑어 날짜가 최신인 쪽을 고른다.)
     """
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
     try:
         names = wb.sheetnames
         cum_name, week_name = discover_perf_sheets(names)
-        frames, used = [], []
+
+        curated_frames, used = [], []
         for sname in (cum_name, week_name):
             if not sname:
                 continue
             rows = list(wb[sname].iter_rows(values_only=True))
             d = parse_material_rows(rows)
             if not d.empty:
-                frames.append(d)
+                curated_frames.append(d)
                 used.append(sname)
-        if not frames:
+
+        if not curated_frames:
             for s in names:
                 head_rows = list(wb[s].iter_rows(values_only=True, max_row=10))
                 hdr_i = _find_header_row(head_rows)
@@ -166,10 +403,46 @@ def load_excel_perf(file_bytes):
                     rows = list(wb[s].iter_rows(values_only=True))
                     d = parse_material_rows(rows)
                     if not d.empty:
-                        frames.append(d)
+                        curated_frames.append(d)
                         used.append(s)
+
+        curated = pd.DataFrame()
+        if curated_frames:
+            curated = pd.concat(curated_frames, ignore_index=True)
+            key_cols = [c for c in ("date", "af", "hour", "target") if c in curated.columns]
+            if key_cols:
+                curated = curated.drop_duplicates(subset=key_cols, keep="last")
+
+        send_cnt_name, rawnew_candidates = discover_raw_query_sheets(names)
+        rawnew_name = None
+        if len(rawnew_candidates) == 1:
+            rawnew_name = rawnew_candidates[0]
+        elif len(rawnew_candidates) > 1:
+            scored = [(c, _peek_max_date(wb, c, RAWNEW_CANDIDATES)) for c in rawnew_candidates]
+            scored = [(c, d) for c, d in scored if d]
+            rawnew_name = max(scored, key=lambda x: x[1])[0] if scored else rawnew_candidates[0]
+
+        derived = pd.DataFrame()
+        derived_label = None
+        if send_cnt_name or rawnew_name:
+            send_raw = parse_send_count_rows(list(wb[send_cnt_name].iter_rows(values_only=True))) \
+                if send_cnt_name else pd.DataFrame()
+            rawnew_raw = parse_rawnew_rows(list(wb[rawnew_name].iter_rows(values_only=True))) \
+                if rawnew_name else pd.DataFrame()
+            meta_lookup = build_af_meta_lookup(curated) if not curated.empty else {}
+            derived = build_from_raw_query_sheets(send_raw, rawnew_raw, meta_lookup)
+            if not derived.empty:
+                derived_label = " + ".join(n for n in (send_cnt_name, rawnew_name) if n) + " (자동 집계)"
+
+        if not derived.empty and not curated.empty:
+            covered = set(zip(curated["date"], curated["af"]))
+            derived = derived[~derived.apply(lambda r: (r["date"], r["af"]) in covered, axis=1)]
+
+        frames = [d for d in (derived, curated) if not d.empty]
         if not frames:
             return pd.DataFrame(), []
+        if derived_label and not derived.empty:
+            used.insert(0, derived_label)
         combined = pd.concat(frames, ignore_index=True)
         key_cols = [c for c in ("date", "af", "hour", "target") if c in combined.columns]
         if key_cols:
@@ -233,13 +506,28 @@ STORE_COLS = list(COLMAP_CANDIDATES.keys())
 STORE_KEY_COLS = ["date", "af", "hour", "target"]
 
 
+def _norm_key_val(v):
+    """병합 키 값 정규화 — None/NaN/빈문자열은 전부 ''로, 숫자형 문자열은 선행0·소수점(.0)을
+    없앤 정수 표기로 맞춘다 ('0800'/'800.0'/800 모두 '800'). CSV 왕복 후 dtype이 바뀌어도
+    (NaN↔'', '800'↔800.0) 같은 값으로 인식되게 하기 위함 — 안 하면 재업로드마다 중복 저장된다."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and pd.isna(v):
+        return ""
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", ""):
+        return ""
+    try:
+        f = float(s)
+        return str(int(f)) if f == int(f) else str(f)
+    except (ValueError, TypeError):
+        return s
+
+
 def store_key_frame(d):
     k = pd.DataFrame(index=d.index)
     for c in STORE_KEY_COLS:
-        if c in d.columns:
-            k[c] = d[c].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
-        else:
-            k[c] = ""
+        k[c] = d[c].map(_norm_key_val) if c in d.columns else ""
     return k
 
 
@@ -503,8 +791,9 @@ def main():
 
     uploaded = st.sidebar.file_uploader(
         "📂 일일 PUSH 실적.xlsx 업로드", type=["xlsx"], accept_multiple_files=True, key="perf_up",
-        help="'누적_소재별' 또는 '소재별 실적(당주)_2' 시트를 자동으로 찾아 읽어요. "
-             "'발송 건수'/'RawNew' 원본 쿼리 시트는 이미 저 시트로 집계되어 있어 읽지 않아요.")
+        help="'누적_소재별'/'소재별 실적(당주)_2' 시트를 우선 찾아 읽고, 없거나 그 시트에 없는 "
+             "일자·AF코드는 '발송 건수'+'RawNew' 원본 쿼리 시트에서 직접 집계해요. "
+             "RawNew는 용량이 크면(수십만 행) 반영에 10~20초 걸릴 수 있어요.")
 
     c1, c2 = st.sidebar.columns(2)
     apply_clicked = c1.button("📥 반영하기", use_container_width=True, disabled=not uploaded)
@@ -517,11 +806,13 @@ def main():
     if apply_clicked and uploaded:
         old = storage_load(BK)
         frames, all_used = [], []
-        for f in uploaded:
-            d, used = cached_load_excel(f.getvalue())
-            if not d.empty:
-                frames.append(d)
-                all_used.extend([f"{f.name} · {u}" for u in used])
+        with st.sidebar.status("엑셀 읽는 중... (RawNew가 크면 시간이 걸려요)", expanded=False) as _status:
+            for f in uploaded:
+                d, used = cached_load_excel(f.getvalue())
+                if not d.empty:
+                    frames.append(d)
+                    all_used.extend([f"{f.name} · {u}" for u in used])
+            _status.update(label="완료", state="complete")
         if not frames:
             st.sidebar.error("인식 가능한 시트를 찾지 못했어요. '누적_소재별'/'소재별 실적(당주)' 시트가 있는지 확인해 주세요.")
         else:
@@ -569,9 +860,18 @@ def main():
         st.info("왼쪽에서 '✍️ 직접 입력'으로 바로 기록하거나, '일일 PUSH 실적.xlsx'를 업로드하고 **반영하기**를 눌러 주세요.")
         with st.expander("기대하는 파일 형식"):
             st.markdown("""
+**우선순위 1 — 이미 집계된 시트가 있으면 그대로 사용**
 - 시트명에 **'누적_소재별'** 또는 **'소재별 실적(당주)'**가 포함된 시트를 찾습니다 (`_2` 등 접미사 있어도 인식).
 - 헤더 컬럼: 일자(8자리)/요일/시간대/타겟구분/발송유형/BPU/우선순위/카테고리/속성/담당자/브랜드/AF코드/기획전No. +
   발송(모수)/UV/VISIT/고객수/주문건수/거래액(주문금액)/유입전환율/주문전환율/효율
+
+**우선순위 2 — 위 시트가 없거나 거기 없는 일자·AF코드는 원본 쿼리에서 직접 집계**
+- **'발송 건수'** 시트: 발송일시/캠페인명/AF코드/모수 컬럼 → (일자,AF코드)별 발송모수로 집계
+- **'RawNew'** 시트: STD_DD/AF_CD/CHNL_DTL_CD/UV/SV/CUST_CNT/ORD_CNT/ORD_AMT 컬럼 → (일자,AF코드)별
+  UV/VISIT/고객수/주문건수/거래액으로 집계 (CHNL_DTL_CD='Total' 행이 있으면 그것만 사용해 중복 합산 방지)
+- 같은 이름의 RawNew 시트가 여러 개 있어도(예: 트레일링 스페이스) 날짜가 최신인 쪽을 자동으로 골라요.
+- BPU/발송유형/기획전No.는 캠페인명이 `이름_일자_시간_발송유형_BPU_기획전No` 패턴이면 자동 추출하고,
+  아니면 기존 소재별 실적 시트에 있는 같은 AF코드의 최근 값을 참고해요. 둘 다 없으면 빈 값으로 남아요.
 - AF코드가 비어있는 행은 자동으로 제외돼요.
             """)
         return
