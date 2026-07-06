@@ -1075,30 +1075,43 @@ def _gs_creds():
 
 
 def load_from_gsheet(spreadsheet_url: str):
-    """구글시트 URL → (msg_df, perf_df). 문구/실적 시트를 자동 탐색."""
+    """구글시트 URL → (msg_df, perf_df, debug_info).
+    읽을 수 없는 시트(session_embeddings 등)는 건너뛰고 계속 진행."""
+    debug_info = []  # [(시트명, 헤더 미리보기, 매칭결과)]
     try:
         import gspread
         creds = _gs_creds()
         if creds is None:
-            return None, None
+            st.error("Streamlit Secrets에 [gcp_service_account] 설정이 없습니다.")
+            return None, None, []
         gc = gspread.authorize(creds)
         sh = gc.open_by_url(spreadsheet_url)
         msg_df, perf_df = None, None
         for ws in sh.worksheets():
-            rows = ws.get_all_values()
+            try:
+                rows = ws.get_all_values()
+            except Exception:
+                debug_info.append((ws.title, "(읽기 오류 — 건너뜀)", "skip"))
+                continue
             if not rows:
+                debug_info.append((ws.title, "(빈 시트)", "empty"))
                 continue
             hdr = [str(c).strip() for c in rows[0]]
+            hdr_preview = ", ".join(hdr[:8])
             has_title = any(h in MSG_COLMAP for h in hdr)
             has_send  = any(h in PERF_COLMAP for h in hdr)
-            if has_title and ("타이틀" in hdr or "제목" in hdr or "본문" in hdr or "내용" in hdr):
+            if has_title and any(h in ("타이틀", "제목", "본문", "내용", "푸시타이틀", "푸시본문") for h in hdr):
                 msg_df = _finalize_msg(_parse_sheet_df(rows, MSG_COLMAP))
-            elif has_send and ("발송건수" in hdr or "발송" in hdr or "오픈건수" in hdr or "거래액" in hdr or "GMV" in hdr):
+                debug_info.append((ws.title, hdr_preview, "✅ 문구"))
+            elif has_send and any(h in ("발송건수", "발송", "발송량", "오픈건수", "거래액", "GMV") for h in hdr):
                 perf_df = _finalize_perf(_parse_sheet_df(rows, PERF_COLMAP))
-        return msg_df, perf_df
+                debug_info.append((ws.title, hdr_preview, "✅ 실적"))
+            else:
+                debug_info.append((ws.title, hdr_preview, "— 헤더 미인식"))
+        return msg_df, perf_df, debug_info
     except Exception as e:
         st.error(f"Google Sheets 연동 오류: {e}")
-        return None, None
+        return None, None, debug_info
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1178,13 +1191,21 @@ def main():
                                     placeholder="https://docs.google.com/spreadsheets/d/…")
             if st.button("연동 시작", type="primary") and gs_url:
                 with st.spinner("Google Sheets 읽는 중…"):
-                    msg_df, perf_df = load_from_gsheet(gs_url)
+                    msg_df, perf_df, debug_info = load_from_gsheet(gs_url)
                 if perf_df is not None and not perf_df.empty:
                     df_raw = merge_msg_perf(msg_df, perf_df) if (msg_df is not None and not msg_df.empty) \
                              else tag_copy(perf_df)
                     st.success(f"✅ 연동 완료 — {len(df_raw):,}건")
                 else:
-                    st.error("데이터를 불러오지 못했습니다. 시트 헤더를 확인하세요.")
+                    st.error("실적 데이터를 인식하지 못했습니다.")
+                    if debug_info:
+                        with st.expander("🔍 시트 감지 결과 (헤더 확인용)"):
+                            for name, hdrs, result in debug_info:
+                                st.markdown(f"**{name}** ({result})  \n`{hdrs}`")
+                        st.info(
+                            "실적 시트 헤더에 **발송건수, 오픈건수, 거래액** 등의 컬럼명이 있어야 합니다.  \n"
+                            "위 감지 결과에서 실제 컬럼명을 확인 후 알려주시면 매핑을 추가해드립니다."
+                        )
 
         else:  # 샘플 데이터
             df_raw = _make_sample_data()
