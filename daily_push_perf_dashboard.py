@@ -1140,7 +1140,10 @@ def main():
                     else:
                         merged = merge_store(storage_load(BK), clean)
                         storage_save(BK, merged)
-                        st.success(f"{len(clean):,}건 계산·저장 완료 (누적 {len(merged):,}건) — 아래에서 계산 결과를 확인하세요.")
+                        st.session_state.manual_prefill = clean[STORE_COLS].copy()
+                        st.session_state.manual_editor_ver = st.session_state.get("manual_editor_ver", 0) + 1
+                        st.success(f"{len(clean):,}건 계산·저장 완료 (누적 {len(merged):,}건) — "
+                                  "**'🧮 최종 값 직접 입력'** 탭에서 AF코드 기준으로 채워진 값을 확인·수정할 수 있어요.")
                         show = clean.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU",
                                                      "stype": "발송유형", "brand": "브랜드"})
                         st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "visit", "cust",
@@ -1153,10 +1156,13 @@ def main():
 
         with tab_final:
             st.caption("엑셀 업로드 없이 이 표에서 바로 최종 발송 실적 값을 입력하고 저장할 수 있어요. "
-                      "**AF코드**와 **일자(YYYYMMDD, 예: 20260706)** 는 필수예요. 행 추가는 표 맨 아래 + 를 누르면 돼요.")
+                      "**AF코드**와 **일자(YYYYMMDD, 예: 20260706)** 는 필수예요. 행 추가는 표 맨 아래 + 를 누르면 돼요. "
+                      "'📋 발송 건수 + RawNew' 탭에서 **계산해서 저장하기**를 누르면 그 결과가 여기 자동으로 채워져요.")
             if "manual_editor_ver" not in st.session_state:
                 st.session_state.manual_editor_ver = 0
-            edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
+            prefill = st.session_state.pop("manual_prefill", None)
+            initial_df = prefill if prefill is not None else blank_row_df()
+            edited = st.data_editor(initial_df, num_rows="dynamic", use_container_width=True, height=280,
                                     column_config=store_column_config(), key=f"manual_editor_{st.session_state.manual_editor_ver}")
             c1, c2 = st.columns(2)
             if c1.button("💾 저장하기", use_container_width=True):
