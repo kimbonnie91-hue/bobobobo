@@ -3,6 +3,7 @@ pandas
 openpyxl
 plotly
 scipy
+statsmodels
 numpy
 seaborn
 matplotlib
