@@ -1150,9 +1150,29 @@ def _gs_creds():
         return None
 
 
+def _find_header_row(rows: list, colmap: dict, max_scan: int = 20) -> int:
+    """rows 앞 max_scan 행 중 colmap 키 매칭이 가장 많은 행 인덱스를 반환."""
+    best_idx, best_count = 0, 0
+    for i, row in enumerate(rows[:max_scan]):
+        hdr = [str(c).strip() if c else "" for c in row]
+        count = sum(1 for h in hdr if h in colmap)
+        if count > best_count:
+            best_count = count
+            best_idx = i
+    return best_idx
+
+
+# 데이터성 시트가 아닌 관리/안내용 시트명 키워드 (이런 시트는 건너뜀)
+_SKIP_SHEET_KEYWORDS = [
+    "session_embeddings", "취합 가이드", "CMS 취합", "양식_", "정책사항",
+    "룰", "문자 발송", "메일 발송", "카테고리메일", "시트50",
+]
+
+
 def load_msg_from_gsheet(spreadsheet_url: str):
     """구글시트 URL → (msg_df, debug_info). 문구·메시지 데이터만 로드.
-    발송주차·발송일자·발송시간·문구 등을 인식한다."""
+    - 첫 20행을 스캔해서 헤더 행 자동 탐지
+    - 주차별 시트 전체를 합산해 반환"""
     debug_info = []
     try:
         import gspread
@@ -1162,8 +1182,12 @@ def load_msg_from_gsheet(spreadsheet_url: str):
             return None, []
         gc = gspread.authorize(creds)
         sh = gc.open_by_url(spreadsheet_url)
-        msg_df = None
+        all_dfs = []
         for ws in sh.worksheets():
+            # 관리용 시트 빠른 건너뛰기
+            if any(kw in ws.title for kw in _SKIP_SHEET_KEYWORDS):
+                debug_info.append((ws.title, "(관리용 시트 — 건너뜀)", "skip"))
+                continue
             try:
                 rows = ws.get_all_values()
             except Exception:
@@ -1172,18 +1196,27 @@ def load_msg_from_gsheet(spreadsheet_url: str):
             if not rows:
                 debug_info.append((ws.title, "(빈 시트)", "empty"))
                 continue
-            hdr = [str(c).strip() for c in rows[0]]
-            hdr_preview = ", ".join(hdr[:10])
+
+            # 첫 20행 스캔해서 컬럼명이 가장 많이 매칭되는 행을 헤더로 사용
+            hdr_idx = _find_header_row(rows, MSG_COLMAP, max_scan=20)
+            hdr = [str(c).strip() for c in rows[hdr_idx]]
             matched = sum(1 for h in hdr if h in MSG_COLMAP)
+            hdr_preview = ", ".join(h for h in hdr[:10] if h) or "(빈 행)"
+
             if matched >= 2:
-                parsed = _finalize_msg(_parse_sheet_df(rows, MSG_COLMAP))
+                parsed = _finalize_msg(_parse_sheet_df(rows[hdr_idx:], MSG_COLMAP))
                 if not parsed.empty:
-                    msg_df = parsed
-                    debug_info.append((ws.title, hdr_preview, f"✅ 문구 ({len(parsed)}행)"))
+                    # 시트명에서 발송주차 자동 주입 (send_week가 비어있을 때)
+                    if "send_week" not in parsed.columns or parsed["send_week"].eq("").all():
+                        parsed["send_week"] = ws.title
+                    all_dfs.append(parsed)
+                    debug_info.append((ws.title, hdr_preview, f"✅ 문구 ({len(parsed)}행, 헤더:{hdr_idx+1}행)"))
                 else:
-                    debug_info.append((ws.title, hdr_preview, "— 파싱 결과 없음"))
+                    debug_info.append((ws.title, hdr_preview, f"— 파싱 결과 없음(헤더:{hdr_idx+1}행)"))
             else:
                 debug_info.append((ws.title, hdr_preview, f"— 매칭 컬럼 부족({matched}개)"))
+
+        msg_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else None
         return msg_df, debug_info
     except Exception as e:
         st.error(f"Google Sheets 연동 오류: {e}")
