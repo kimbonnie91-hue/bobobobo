@@ -161,6 +161,33 @@ def parse_perf_bytes(file_bytes: bytes, sheet_name: str | None = None) -> pd.Dat
     return _finalize_perf(df)
 
 
+def _parse_perf_from_zip_or_excel(file_bytes: bytes, filename: str = "") -> pd.DataFrame:
+    """ZIP(여러 엑셀 일괄) 또는 단일 xlsx/xls → 실적 DataFrame.
+    ZIP이면 내부 xlsx/xls를 모두 파싱한 뒤 세로로 이어 붙인다."""
+    import zipfile
+    if not filename.lower().endswith(".zip"):
+        return parse_perf_bytes(file_bytes)
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+        excel_names = [
+            n for n in zf.namelist()
+            if n.lower().endswith((".xlsx", ".xls"))
+            and not os.path.basename(n).startswith((".", "__", "~"))
+        ]
+        if not excel_names:
+            raise ValueError("ZIP 파일 안에 xlsx/xls 파일이 없습니다.")
+        dfs, errors = [], []
+        for name in sorted(excel_names):
+            try:
+                df = parse_perf_bytes(zf.read(name))
+                if not df.empty:
+                    dfs.append(df)
+            except Exception as e:
+                errors.append(f"{os.path.basename(name)}: {e}")
+    if not dfs:
+        raise ValueError("ZIP 내 실적 데이터를 인식하지 못했습니다.\n" + "\n".join(errors))
+    return pd.concat(dfs, ignore_index=True)
+
+
 def _parse_hour_min(t: str):
     """'14:30', '14시30분', '14시', '1430' 형식에서 (hour, minute) 반환."""
     t = str(t).strip()
@@ -1271,8 +1298,8 @@ def main():
             )
             st.markdown("**② 발송 실적 — 엑셀 파일**")
             perf_file_h = st.file_uploader(
-                "실적 데이터 (발송량·오픈·GMV 포함)",
-                type=["xlsx", "xls"],
+                "실적 데이터 (발송량·오픈·GMV 포함) — xlsx, xls, zip 가능",
+                type=["xlsx", "xls", "zip"],
                 key="perf_upload_hybrid",
             )
 
@@ -1281,7 +1308,7 @@ def main():
                     with st.spinner("구글시트 & 실적 파일 로드 중…"):
                         msg_df_h, dbg_h = load_msg_from_gsheet(gs_url_h)
                         try:
-                            perf_df_h = parse_perf_bytes(perf_file_h.read())
+                            perf_df_h = _parse_perf_from_zip_or_excel(perf_file_h.read(), perf_file_h.name)
                         except Exception as _e:
                             st.error(f"실적 파일 오류: {_e}")
                             perf_df_h = pd.DataFrame()
@@ -1322,13 +1349,14 @@ def main():
             msg_file = st.file_uploader("푸시 문구 (타이틀·본문·BPU 포함)", type=["xlsx", "xls"],
                                          key="msg_upload")
             st.markdown("**실적 데이터 파일**")
-            perf_file = st.file_uploader("발송 성과 (발송량·오픈·GMV 포함)", type=["xlsx", "xls"],
+            perf_file = st.file_uploader("발송 성과 (발송량·오픈·GMV 포함) — xlsx, xls, zip 가능",
+                                          type=["xlsx", "xls", "zip"],
                                           key="perf_upload")
 
             if msg_file and perf_file:
                 try:
                     msg_df  = parse_msg_bytes(msg_file.read())
-                    perf_df = parse_perf_bytes(perf_file.read())
+                    perf_df = _parse_perf_from_zip_or_excel(perf_file.read(), perf_file.name)
                     if msg_df.empty or "send_id" not in msg_df.columns:
                         st.warning("⚠️ 문구 파일에서 인식 가능한 헤더를 찾지 못했어요. "
                                    "실적 데이터만으로 분석을 진행합니다.")
@@ -1340,7 +1368,7 @@ def main():
                 st.info("📋 실적 파일도 업로드하면 성과 분석이 가능합니다.")
             elif perf_file and not msg_file:
                 try:
-                    perf_df = parse_perf_bytes(perf_file.read())
+                    perf_df = _parse_perf_from_zip_or_excel(perf_file.read(), perf_file.name)
                     df_raw  = tag_copy(perf_df)
                     st.success(f"✅ 실적 파일 로드 — {len(df_raw):,}건 (문구 미연결)")
                 except Exception as e:
