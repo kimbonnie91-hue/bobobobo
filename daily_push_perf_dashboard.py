@@ -545,13 +545,18 @@ def merge_store(old, new):
     return both.loc[keep].reset_index(drop=True)
 
 
-def blank_row_df():
-    """직접 입력용 빈 입력행 1건 — 텍스트 컬럼은 빈 문자열, 숫자 컬럼은 NaN(빈 칸)으로 표시."""
-    row = {c: (np.nan if c in NUM_COLS else "") for c in STORE_COLS}
+def _blank_editor_df(cols, numeric_cols):
+    """빈 입력행 1건 — 텍스트 컬럼은 빈 문자열, 숫자 컬럼은 NaN(빈 칸)으로 표시."""
+    row = {c: (np.nan if c in numeric_cols else "") for c in cols}
     d = pd.DataFrame([row])
-    for c in NUM_COLS:
+    for c in numeric_cols:
         d[c] = pd.to_numeric(d[c])
     return d
+
+
+def blank_row_df():
+    """직접 입력(최종 값)용 빈 입력행 1건."""
+    return _blank_editor_df(STORE_COLS, NUM_COLS)
 
 
 def clean_manual_rows(edited):
@@ -565,6 +570,44 @@ def clean_manual_rows(edited):
     d["date"] = d["date"].apply(_norm_date)
     d = d.dropna(subset=["date"])
     return d[STORE_COLS]
+
+
+# ── '직접 입력' 페이지의 '발송 건수'/'RawNew' 원본 형태 입력 표 — 엑셀 업로드와 같은
+# build_from_raw_query_sheets()로 발송모수/UV/VISIT/고객수/주문건수/거래액을 그대로 자동 계산한다 ──
+SEND_COUNT_ENTRY_COLS = ["date", "camp_name", "channel", "af", "send"]
+SEND_COUNT_ENTRY_NUM = ["send"]
+RAWNEW_ENTRY_COLS = ["date", "af", "chnl", "uv", "visit", "cust", "oc", "amt"]
+RAWNEW_ENTRY_NUM = ["uv", "visit", "cust", "oc", "amt"]
+
+
+def clean_send_count_entry(edited):
+    """'발송 건수' 직접 입력 표 → build_from_raw_query_sheets에 넣을 수 있는 형태로 정리."""
+    d = edited.copy()
+    for c in SEND_COUNT_ENTRY_COLS:
+        if c not in d.columns:
+            d[c] = None
+    d["af"] = d["af"].apply(lambda v: "" if v is None else str(v).strip())
+    d = d[d["af"] != ""]
+    d["date"] = d["date"].apply(_norm_date)
+    d = d.dropna(subset=["date"])
+    d["send"] = pd.to_numeric(d["send"], errors="coerce")
+    return d[SEND_COUNT_ENTRY_COLS]
+
+
+def clean_rawnew_entry(edited):
+    """'RawNew' 직접 입력 표 → build_from_raw_query_sheets에 넣을 수 있는 형태로 정리."""
+    d = edited.copy()
+    for c in RAWNEW_ENTRY_COLS:
+        if c not in d.columns:
+            d[c] = None
+    d["af"] = d["af"].apply(lambda v: "" if v is None else str(v).strip())
+    d = d[d["af"] != ""]
+    d["date"] = d["date"].apply(_norm_date)
+    d = d.dropna(subset=["date"])
+    d["chnl"] = d["chnl"].apply(lambda v: "" if v is None else str(v).strip())
+    for c in RAWNEW_ENTRY_NUM:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    return d[RAWNEW_ENTRY_COLS]
 
 
 def load_store():
@@ -1032,26 +1075,92 @@ def main():
     # ══════════════════════════════════════════════════════════
     elif page == "✍️ 직접 입력":
         st.title("직접 입력")
-        st.caption("엑셀 업로드 없이 이 표에서 바로 발송 실적을 입력하고 저장할 수 있어요. "
-                   "**AF코드**와 **일자(YYYYMMDD, 예: 20260706)** 는 필수예요. 행 추가는 표 맨 아래 + 를 누르면 돼요.")
-        if "manual_editor_ver" not in st.session_state:
-            st.session_state.manual_editor_ver = 0
-        edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
-                                column_config=store_column_config(), key=f"manual_editor_{st.session_state.manual_editor_ver}")
-        c1, c2 = st.columns(2)
-        if c1.button("💾 저장하기", use_container_width=True):
-            clean = clean_manual_rows(edited)
-            if clean.empty:
-                st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
-            else:
-                merged = merge_store(storage_load(BK), clean)
-                storage_save(BK, merged)
-                st.success(f"{len(clean):,}건 저장 완료 (누적 {len(merged):,}건)")
+        tab_raw, tab_final = st.tabs(["📋 발송 건수 + RawNew (자동 계산)", "🧮 최종 값 직접 입력"])
+
+        with tab_raw:
+            st.caption("엑셀의 **'발송 건수'**·**'RawNew'** 시트와 같은 원본 형태로 입력하면, 엑셀 업로드와 "
+                      "**완전히 같은 방식**(CHNL_DTL_CD='Total' 우선 등)으로 발송모수/UV/VISIT/고객수/주문건수/거래액을 "
+                      "자동 계산해서 저장해요. 두 표 모두 **AF코드**·**일자(YYYYMMDD)** 는 필수예요.")
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.markdown("**발송 건수** (발송로그)")
+                if "raw_send_ver" not in st.session_state:
+                    st.session_state.raw_send_ver = 0
+                send_edit = st.data_editor(
+                    _blank_editor_df(SEND_COUNT_ENTRY_COLS, SEND_COUNT_ENTRY_NUM), num_rows="dynamic",
+                    use_container_width=True, height=260,
+                    column_config={
+                        "date": st.column_config.TextColumn("일자(YYYYMMDD)*"),
+                        "camp_name": st.column_config.TextColumn("캠페인명"),
+                        "channel": st.column_config.TextColumn("발송채널"),
+                        "af": st.column_config.TextColumn("AF코드*"),
+                        "send": st.column_config.NumberColumn("모수(발송)*"),
+                    }, key=f"raw_send_editor_{st.session_state.raw_send_ver}")
+            with rc2:
+                st.markdown("**RawNew** (성과 원자료)")
+                if "raw_perf_ver" not in st.session_state:
+                    st.session_state.raw_perf_ver = 0
+                perf_edit = st.data_editor(
+                    _blank_editor_df(RAWNEW_ENTRY_COLS, RAWNEW_ENTRY_NUM), num_rows="dynamic",
+                    use_container_width=True, height=260,
+                    column_config={
+                        "date": st.column_config.TextColumn("일자(YYYYMMDD)*"),
+                        "af": st.column_config.TextColumn("AF코드*"),
+                        "chnl": st.column_config.TextColumn("CHNL_DTL_CD(Total 권장)"),
+                        "uv": st.column_config.NumberColumn("UV"),
+                        "visit": st.column_config.NumberColumn("VISIT(SV)"),
+                        "cust": st.column_config.NumberColumn("고객수"),
+                        "oc": st.column_config.NumberColumn("주문건수"),
+                        "amt": st.column_config.NumberColumn("거래액"),
+                    }, key=f"raw_perf_editor_{st.session_state.raw_perf_ver}")
+
+            rb1, rb2 = st.columns(2)
+            if rb1.button("🧮 계산해서 저장하기", use_container_width=True, key="raw_calc_save"):
+                send_clean = clean_send_count_entry(send_edit)
+                perf_clean = clean_rawnew_entry(perf_edit)
+                if send_clean.empty and perf_clean.empty:
+                    st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
+                else:
+                    meta_lookup = build_af_meta_lookup(df) if not df.empty else {}
+                    derived = build_from_raw_query_sheets(send_clean, perf_clean, meta_lookup)
+                    clean = clean_manual_rows(derived)
+                    if clean.empty:
+                        st.warning("계산된 유효한 행이 없어요.")
+                    else:
+                        merged = merge_store(storage_load(BK), clean)
+                        storage_save(BK, merged)
+                        st.success(f"{len(clean):,}건 계산·저장 완료 (누적 {len(merged):,}건) — 아래에서 계산 결과를 확인하세요.")
+                        show = clean.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU",
+                                                     "stype": "발송유형", "brand": "브랜드"})
+                        st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "visit", "cust",
+                                          "주문건수", "거래액"]].rename(columns={"visit": "VISIT", "cust": "고객수"}),
+                                    use_container_width=True, hide_index=True)
+            if rb2.button("↺ 두 표 비우기", use_container_width=True, key="raw_calc_clear"):
+                st.session_state.raw_send_ver += 1
+                st.session_state.raw_perf_ver += 1
+                st.rerun()
+
+        with tab_final:
+            st.caption("엑셀 업로드 없이 이 표에서 바로 최종 발송 실적 값을 입력하고 저장할 수 있어요. "
+                      "**AF코드**와 **일자(YYYYMMDD, 예: 20260706)** 는 필수예요. 행 추가는 표 맨 아래 + 를 누르면 돼요.")
+            if "manual_editor_ver" not in st.session_state:
+                st.session_state.manual_editor_ver = 0
+            edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
+                                    column_config=store_column_config(), key=f"manual_editor_{st.session_state.manual_editor_ver}")
+            c1, c2 = st.columns(2)
+            if c1.button("💾 저장하기", use_container_width=True):
+                clean = clean_manual_rows(edited)
+                if clean.empty:
+                    st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
+                else:
+                    merged = merge_store(storage_load(BK), clean)
+                    storage_save(BK, merged)
+                    st.success(f"{len(clean):,}건 저장 완료 (누적 {len(merged):,}건)")
+                    st.session_state.manual_editor_ver += 1
+                    st.rerun()
+            if c2.button("↺ 비우기", use_container_width=True):
                 st.session_state.manual_editor_ver += 1
                 st.rerun()
-        if c2.button("↺ 비우기", use_container_width=True):
-            st.session_state.manual_editor_ver += 1
-            st.rerun()
 
     # ══════════════════════════════════════════════════════════
     # 데이터
