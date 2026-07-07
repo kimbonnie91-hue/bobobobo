@@ -1056,7 +1056,7 @@ def main():
         st.sidebar.caption("아직 데이터가 없어요. '✍️ 직접 입력'에서 바로 추가하거나 엑셀을 업로드해 보세요.")
         f = df.copy()
 
-    pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "주차별 누적 추이", "AF코드별 리더보드", "✍️ 직접 입력", "데이터"]
+    pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "주차별 누적 추이", "AF코드별 리더보드", "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
     if df.empty and page not in ("✍️ 직접 입력", "데이터"):
@@ -1216,6 +1216,73 @@ def main():
         pivot = f.pivot_table(index="bpu_group", columns="stype", values=metric, aggfunc="sum", fill_value=0)
         pivot.index.name = "BPU"
         st.dataframe(pivot.style.format("{:,.0f}"), use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════
+    # 캠페인별 실적 — BPU 안에서 발송유형×카테고리로 캠페인을 구분해서 본다
+    # ══════════════════════════════════════════════════════════
+    elif page == "캠페인별 실적":
+        st.title("캠페인별 실적")
+        st.caption("같은 BPU 안에서도 캠페인마다 발송유형·카테고리가 달라요. 발송유형/카테고리를 "
+                  "여러 개 선택하면 하나로 합쳐서 봐요 — 예를 들어 '럭키먼데이' 캠페인이 카테고리 "
+                  "'장바구니'·'럭키먼데이' 두 군데에 걸쳐 있다면 둘 다 선택해서 합쳐 보면 돼요.")
+
+        bpu_options = sorted([b for b in f["bpu_group"].unique() if b])
+        if not bpu_options:
+            st.info("표시할 데이터가 없어요.")
+        else:
+            default_bpu = "마케팅" if "마케팅" in bpu_options else bpu_options[0]
+            bpu_pick = st.selectbox("BPU", bpu_options, index=bpu_options.index(default_bpu))
+            bf = f[f["bpu_group"] == bpu_pick]
+
+            c1, c2 = st.columns(2)
+            stype_pick = c1.multiselect("발송유형", sorted([s for s in bf["stype"].unique() if s]),
+                                        key="camp_stype_pick")
+            cat_pick = c2.multiselect("카테고리", sorted([c for c in bf["cat"].unique() if c]),
+                                      key="camp_cat_pick")
+
+            cf = bf.copy()
+            if stype_pick:
+                cf = cf[cf["stype"].isin(stype_pick)]
+            if cat_pick:
+                cf = cf[cf["cat"].isin(cat_pick)]
+
+            if cf.empty:
+                st.info("조건에 맞는 데이터가 없어요. 발송유형/카테고리를 선택해 보세요.")
+            else:
+                st.markdown("#### 발송유형 × 카테고리 요약")
+                summary = agg_metrics(cf, ["stype", "cat"]).sort_values("amt", ascending=False)
+                show_summary = summary.rename(columns={"stype": "발송유형", "cat": "카테고리", "n": "건수",
+                                                        **METRIC_LABELS, **RATE_LABELS})
+                st.dataframe(show_summary[["발송유형", "카테고리", "건수", "발송모수", "UV", "주문건수", "거래액",
+                                          *RATE_LABELS.values()]].style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                    RATE_LABELS["ctr"]: "{:.2%}", RATE_LABELS["cvr"]: "{:.2%}",
+                    RATE_LABELS["rps"]: "{:,.0f}", RATE_LABELS["aov"]: "{:,.0f}",
+                }), use_container_width=True, hide_index=True)
+
+                st.markdown("#### 주차별 비교")
+                wk = cf.groupby(["week_start", "week_label"], dropna=False).agg(
+                    send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+                wk = wk.sort_values("week_start")
+                metric = st.selectbox("차트 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k],
+                                      key="camp_week_metric")
+                fig = go.Figure(go.Bar(x=wk["week_label"], y=wk[metric], marker_color="#7b5bc0"))
+                fig.update_layout(**base_layout(title=f"주차별 {METRIC_LABELS[metric]}"))
+                st.plotly_chart(fig, use_container_width=True)
+                show_wk = wk.rename(columns={"week_label": "주차", **METRIC_LABELS})
+                st.dataframe(show_wk[["주차", "발송모수", "UV", "주문건수", "거래액"]].style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                }), use_container_width=True, hide_index=True)
+
+                st.markdown("#### 일자별 상세")
+                detail = cf.sort_values("dt", ascending=False)[
+                    ["date", "week_label", "stype", "cat", "brand", "af", "send", "uv", "oc", "amt"]]
+                show_detail = detail.rename(columns={"date": "일자", "week_label": "주차", "stype": "발송유형",
+                                                     "cat": "카테고리", "brand": "브랜드", "af": "AF코드",
+                                                     **METRIC_LABELS})
+                st.dataframe(show_detail.style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                }), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 주차별 누적 추이
