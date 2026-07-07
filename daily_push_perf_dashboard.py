@@ -619,8 +619,8 @@ def clean_rawnew_entry(edited):
     return d[RAWNEW_ENTRY_COLS]
 
 
-LOOKUP_METRIC_COLS = ["send", "uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr", "eff"]
-# 자동 조회(비활성화)로 두는 컬럼 — 발송모수(send)는 직접 수정 가능하도록 제외한다.
+# 메인 입력 그리드에서 자동 조회(비활성화)로 두는 컬럼 — 발송모수(send)는 '자동 조회 결과' 표에서
+# 직접 수정 가능하도록 여기서는 제외한다.
 AUTO_LOOKUP_COLS = ["uv", "visit", "cust", "oc", "amt", "infl_cr", "ord_cr", "eff"]
 
 
@@ -671,6 +671,14 @@ def lookup_send_uv_etc(meta_df, send_log_df, rawnew_df):
     for col in ("uv", "visit", "cust", "oc", "amt"):
         d[col] = [(perf_map[k][col] if k in perf_map else np.nan) for k in keys]
 
+    return compute_ratio_cols(d)
+
+
+def compute_ratio_cols(d):
+    """발송모수/UV/고객수/거래액이 채워진 표 → 유입전환율(UV/발송)/주문전환율(고객수/UV)/
+    효율(거래액/발송)을 (다시) 계산해 넣는다. '자동 조회 결과'에서 발송모수를 직접 고쳤을 때
+    비율을 다시 맞추는 용도로도 재사용한다."""
+    d = d.copy()
     send_n = pd.to_numeric(d["send"], errors="coerce")
     uv_n = pd.to_numeric(d["uv"], errors="coerce")
     cust_n = pd.to_numeric(d["cust"], errors="coerce")
@@ -1216,14 +1224,38 @@ def main():
                 st.rerun()
 
             meta_clean = clean_manual_rows(edited)
+            final_rows = None
             if meta_clean.empty:
                 st.info("AF코드와 일자를 입력하면 조회 결과가 여기 표시돼요.")
             else:
                 looked_up = lookup_send_uv_etc(meta_clean, send_lookup, perf_lookup)
-                st.markdown("**🔎 자동 조회 결과** (저장하기를 누르면 이 값이 저장돼요)")
-                show = looked_up.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU", "stype": "발송유형",
-                                                 "brand": "브랜드", "visit": "VISIT", "cust": "고객수",
-                                                 "infl_cr": "유입전환율", "ord_cr": "주문전환율", "eff": "효율"})
+                st.markdown("**🔎 자동 조회 결과** — **발송모수**는 조회가 안 됐거나 값이 다르면 여기서 바로 고칠 수 있어요 "
+                           "(고치면 유입전환율/주문전환율/효율이 그 값 기준으로 다시 계산돼요).")
+                edit_cols = ["af", "bpu", "stype", "brand", "send", "uv", "visit", "cust", "oc", "amt"]
+                row_id = tuple(zip(looked_up["date"], looked_up["af"]))
+                results_edited = st.data_editor(
+                    looked_up[edit_cols], use_container_width=True, hide_index=True, num_rows="fixed",
+                    column_config={
+                        "af": st.column_config.TextColumn("AF코드", disabled=True),
+                        "bpu": st.column_config.TextColumn("BPU", disabled=True),
+                        "stype": st.column_config.TextColumn("발송유형", disabled=True),
+                        "brand": st.column_config.TextColumn("브랜드", disabled=True),
+                        "send": st.column_config.NumberColumn("발송모수"),
+                        "uv": st.column_config.NumberColumn("UV", disabled=True),
+                        "visit": st.column_config.NumberColumn("VISIT", disabled=True),
+                        "cust": st.column_config.NumberColumn("고객수", disabled=True),
+                        "oc": st.column_config.NumberColumn("주문건수", disabled=True),
+                        "amt": st.column_config.NumberColumn("거래액", disabled=True),
+                    }, key=f"results_editor_{hash(row_id)}")
+
+                final_rows = looked_up.copy()
+                final_rows["send"] = results_edited["send"].values
+                final_rows = compute_ratio_cols(final_rows)
+
+                st.markdown("**최종 계산값** (저장하기를 누르면 이 값이 저장돼요)")
+                show = final_rows.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU", "stype": "발송유형",
+                                                  "brand": "브랜드", "visit": "VISIT", "cust": "고객수",
+                                                  "infl_cr": "유입전환율", "ord_cr": "주문전환율", "eff": "효율"})
                 st.dataframe(show[["AF코드", "BPU", "발송유형", "브랜드", "발송모수", "UV", "VISIT", "고객수",
                                   "주문건수", "거래액", "유입전환율", "주문전환율", "효율"]].style.format({
                     "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
@@ -1233,13 +1265,12 @@ def main():
 
             c1, c2 = st.columns(2)
             if c1.button("💾 저장하기", use_container_width=True):
-                if meta_clean.empty:
+                if final_rows is None or final_rows.empty:
                     st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
                 else:
-                    looked_up = lookup_send_uv_etc(meta_clean, send_lookup, perf_lookup)
-                    merged = merge_store(storage_load(BK), looked_up[STORE_COLS])
+                    merged = merge_store(storage_load(BK), final_rows[STORE_COLS])
                     storage_save(BK, merged)
-                    st.success(f"{len(looked_up):,}건 저장 완료 (누적 {len(merged):,}건)")
+                    st.success(f"{len(final_rows):,}건 저장 완료 (누적 {len(merged):,}건)")
                     st.session_state.manual_editor_ver += 1
                     st.rerun()
             if c2.button("↺ 비우기", use_container_width=True):
