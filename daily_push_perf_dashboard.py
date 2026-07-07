@@ -1071,6 +1071,32 @@ def main():
             "CTR(UV/발송)": "{:.2%}", "주문전환율(주문/UV)": "{:.2%}", "RPS(발송당거래액)": "{:,.0f}", "객단가(거래액/주문)": "{:,.0f}",
         }), use_container_width=True, hide_index=True)
 
+        st.markdown("#### 주차별 BPU 랭킹")
+        st.caption("선택한 주차의 BPU별 발송건수·거래액·발송건당 거래액을 비교해 순위를 매겨요 (동률은 같은 순위).")
+        weeks_sorted = f[["week_start", "week_label"]].drop_duplicates().sort_values("week_start", ascending=False)
+        week_options = weeks_sorted["week_label"].tolist()
+        if not week_options:
+            st.info("표시할 주차 데이터가 없어요.")
+        else:
+            week_pick = st.selectbox("주차 선택", week_options, key="bpu_rank_week")
+            wf = f[f["week_label"] == week_pick]
+            rank_g = wf.groupby("bpu_group", dropna=False).agg(send=("send", "sum"), amt=("amt", "sum")).reset_index()
+            rank_g = rank_g[rank_g["bpu_group"] != ""]
+            rank_g["rps"] = np.where(rank_g["send"] > 0, rank_g["amt"] / rank_g["send"], 0.0)
+            rank_g["RANK"] = rank_g["rps"].rank(method="min", ascending=False).astype(int)
+            rank_g = rank_g.sort_values("RANK")
+            total_send, total_amt = rank_g["send"].sum(), rank_g["amt"].sum()
+            total_row = pd.DataFrame([{
+                "bpu_group": "계", "send": total_send, "amt": total_amt,
+                "rps": (total_amt / total_send if total_send > 0 else 0.0), "RANK": "-",
+            }])
+            rank_table = pd.concat([total_row, rank_g], ignore_index=True)
+            show_rank = rank_table.rename(columns={"bpu_group": "BPU", "amt": "거래액",
+                                                    "send": "전주 PUSH발송건수", "rps": "발송건당 거래액"})
+            st.dataframe(show_rank[["BPU", "거래액", "전주 PUSH발송건수", "발송건당 거래액", "RANK"]].style.format({
+                "거래액": "{:,.0f}", "전주 PUSH발송건수": "{:,.0f}", "발송건당 거래액": "{:,.0f}",
+            }), use_container_width=True, hide_index=True)
+
         st.markdown("#### BPU 드릴다운")
         pick = st.selectbox("BPU 선택", gs["bpu_group"].tolist())
         picked_df = f[f["bpu_group"] == pick]
