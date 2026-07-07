@@ -1072,7 +1072,8 @@ def main():
         }), use_container_width=True, hide_index=True)
 
         st.markdown("#### 주차별 BPU 랭킹")
-        st.caption("선택한 주차의 BPU별 발송건수·거래액·발송건당 거래액을 비교해 순위를 매겨요 (동률은 같은 순위).")
+        st.caption("선택한 주차의 1~4BPU 발송건수·거래액·발송건당 거래액을 비교해 순위를 매겨요 "
+                  "(동률은 같은 순위, 마케팅/편성/브랜드컨텐츠 등은 제외).")
         weeks_sorted = f[["week_start", "week_label"]].drop_duplicates().sort_values("week_start", ascending=False)
         week_options = weeks_sorted["week_label"].tolist()
         if not week_options:
@@ -1081,7 +1082,7 @@ def main():
             week_pick = st.selectbox("주차 선택", week_options, key="bpu_rank_week")
             wf = f[f["week_label"] == week_pick]
             rank_g = wf.groupby("bpu_group", dropna=False).agg(send=("send", "sum"), amt=("amt", "sum")).reset_index()
-            rank_g = rank_g[rank_g["bpu_group"] != ""]
+            rank_g = rank_g[rank_g["bpu_group"].str.match(r"^\d+BPU$", na=False)]
             rank_g["rps"] = np.where(rank_g["send"] > 0, rank_g["amt"] / rank_g["send"], 0.0)
             rank_g["RANK"] = rank_g["rps"].rank(method="min", ascending=False).astype(int)
             rank_g = rank_g.sort_values("RANK")
@@ -1100,13 +1101,9 @@ def main():
         st.markdown("#### BPU 드릴다운")
         pick = st.selectbox("BPU 선택", gs["bpu_group"].tolist())
         picked_df = f[f["bpu_group"] == pick]
-        tab_brand, tab_cat, tab_attr = st.tabs(["브랜드", "카테고리", "속성"])
-        drill_specs = [(tab_brand, "brand", "브랜드"), (tab_cat, "cat", "카테고리"), (tab_attr, "attr", "속성")]
-        for tab, col, label in drill_specs:
-            with tab:
-                drill = agg_metrics(picked_df, [col]).sort_values("amt", ascending=False).head(15)
-                st.dataframe(drill.rename(columns={**METRIC_LABELS, col: label, "n": "캠페인수"}),
-                             use_container_width=True, hide_index=True)
+        drill = agg_metrics(picked_df, ["brand", "cat"]).sort_values("amt", ascending=False).head(15)
+        st.dataframe(drill.rename(columns={**METRIC_LABELS, "brand": "브랜드", "cat": "카테고리", "n": "캠페인수"}),
+                     use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 발송유형별 실적
