@@ -458,11 +458,21 @@ def load_excel_perf(file_bytes):
         wb.close()
 
 
+def _norm_bpu_group(v):
+    """세부 BPU 코드(1BPU_B, 1BPU_C, 3BPU_B, 4BPU_A 등)를 대표 BPU(1BPU/3BPU/4BPU)로 묶는다.
+    '마케팅'/'편성'/'브랜드컨텐츠'/'2BPU'처럼 접미사가 없는 값은 그대로 둔다."""
+    s = str(v or "").strip()
+    if not s:
+        return s
+    m = re.match(r"^(\d*BPU)_[A-Za-z0-9]+$", s, re.I)
+    return m.group(1) if m else s
+
+
 def _finalize(df):
     """숫자/텍스트 정리 + 파생지표(ctr/cvr/rps/aov) + 주차(월~일) 라벨 계산."""
     cols = list(COLMAP_CANDIDATES.keys())
     if df is None or df.empty:
-        extra = ["dt", "week_start", "week_end", "week_label", "dow", "ctr", "cvr", "rps", "aov"]
+        extra = ["dt", "week_start", "week_end", "week_label", "dow", "ctr", "cvr", "rps", "aov", "bpu_group"]
         return pd.DataFrame(columns=cols + extra)
     df = df.copy()
     df["af"] = df["af"].astype(str).str.strip()
@@ -475,6 +485,7 @@ def _finalize(df):
             df[c] = df[c].apply(lambda v: "" if v is None else str(v).strip())
         else:
             df[c] = ""
+    df["bpu_group"] = df["bpu"].map(_norm_bpu_group)
     df["dt"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
     df = df.dropna(subset=["dt"]).reset_index(drop=True)
     wk = df["dt"].dt.to_period("W-SUN")
@@ -1042,25 +1053,26 @@ def main():
     # ══════════════════════════════════════════════════════════
     elif page == "BPU별 실적":
         st.title("BPU별 실적")
-        st.caption("소재별 실적 원본 데이터를 BPU 기준으로 실시간 집계한 화면이에요.")
-        g = agg_metrics(f, ["bpu"])
-        g = g[g["bpu"] != ""].sort_values("amt", ascending=False)
+        st.caption("소재별 실적 원본 데이터를 BPU 기준으로 실시간 집계한 화면이에요 "
+                  "(1BPU_B/1BPU_C처럼 세부 코드가 붙은 BPU는 1BPU로 묶어서 보여줘요).")
+        g = agg_metrics(f, ["bpu_group"])
+        g = g[g["bpu_group"] != ""].sort_values("amt", ascending=False)
         metric = st.selectbox("정렬/차트 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k], key="bpu_metric")
         gs = g.sort_values(metric, ascending=False)
-        fig = go.Figure(go.Bar(x=gs[metric], y=gs["bpu"], orientation="h", marker_color="#4f8fff"))
+        fig = go.Figure(go.Bar(x=gs[metric], y=gs["bpu_group"], orientation="h", marker_color="#4f8fff"))
         fig.update_layout(**base_layout(h=max(300, 28 * len(gs)), title=f"BPU별 {METRIC_LABELS[metric]}"))
         fig.update_yaxes(autorange="reversed")
         st.plotly_chart(fig, use_container_width=True)
 
-        show = gs.rename(columns={**METRIC_LABELS, **RATE_LABELS, "bpu": "BPU", "n": "캠페인수"})
+        show = gs.rename(columns={**METRIC_LABELS, **RATE_LABELS, "bpu_group": "BPU", "n": "캠페인수"})
         st.dataframe(show.style.format({
             "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
             "CTR(UV/발송)": "{:.2%}", "주문전환율(주문/UV)": "{:.2%}", "RPS(발송당거래액)": "{:,.0f}", "객단가(거래액/주문)": "{:,.0f}",
         }), use_container_width=True, hide_index=True)
 
         st.markdown("#### BPU 드릴다운")
-        pick = st.selectbox("BPU 선택", gs["bpu"].tolist())
-        drill = agg_metrics(f[f["bpu"] == pick], ["brand"]).sort_values("amt", ascending=False).head(15)
+        pick = st.selectbox("BPU 선택", gs["bpu_group"].tolist())
+        drill = agg_metrics(f[f["bpu_group"] == pick], ["brand"]).sort_values("amt", ascending=False).head(15)
         st.dataframe(drill.rename(columns={**METRIC_LABELS, "brand": "브랜드", "n": "캠페인수"}),
                      use_container_width=True, hide_index=True)
 
@@ -1090,7 +1102,8 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 발송유형 × BPU")
-        pivot = f.pivot_table(index="bpu", columns="stype", values=metric, aggfunc="sum", fill_value=0)
+        pivot = f.pivot_table(index="bpu_group", columns="stype", values=metric, aggfunc="sum", fill_value=0)
+        pivot.index.name = "BPU"
         st.dataframe(pivot.style.format("{:,.0f}"), use_container_width=True)
 
     # ══════════════════════════════════════════════════════════
