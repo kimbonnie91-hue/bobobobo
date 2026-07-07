@@ -1229,28 +1229,41 @@ def main():
                 st.info("AF코드와 일자를 입력하면 조회 결과가 여기 표시돼요.")
             else:
                 looked_up = lookup_send_uv_etc(meta_clean, send_lookup, perf_lookup)
-                st.markdown("**🔎 자동 조회 결과** — **발송모수**는 조회가 안 됐거나 값이 다르면 여기서 바로 고칠 수 있어요 "
-                           "(고치면 유입전환율/주문전환율/효율이 그 값 기준으로 다시 계산돼요).")
                 edit_cols = ["af", "bpu", "stype", "brand", "send", "uv", "visit", "cust", "oc", "amt"]
                 row_id = tuple(zip(looked_up["date"], looked_up["af"]))
-                results_edited = st.data_editor(
-                    looked_up[edit_cols], use_container_width=True, hide_index=True, num_rows="fixed",
-                    column_config={
-                        "af": st.column_config.TextColumn("AF코드", disabled=True),
-                        "bpu": st.column_config.TextColumn("BPU", disabled=True),
-                        "stype": st.column_config.TextColumn("발송유형", disabled=True),
-                        "brand": st.column_config.TextColumn("브랜드", disabled=True),
-                        "send": st.column_config.NumberColumn("발송모수"),
-                        "uv": st.column_config.NumberColumn("UV", disabled=True),
-                        "visit": st.column_config.NumberColumn("VISIT", disabled=True),
-                        "cust": st.column_config.NumberColumn("고객수", disabled=True),
-                        "oc": st.column_config.NumberColumn("주문건수", disabled=True),
-                        "amt": st.column_config.NumberColumn("거래액", disabled=True),
-                    }, key=f"results_editor_{hash(row_id)}")
 
-                final_rows = looked_up.copy()
-                final_rows["send"] = results_edited["send"].values
-                final_rows = compute_ratio_cols(final_rows)
+                st.markdown("**🔎 자동 조회 결과** — 조회가 안 됐거나 값이 다르면 발송모수/UV/VISIT/고객수/주문건수/거래액을 "
+                           "직접 고칠 수 있어요. **여러 칸을 고친 뒤 아래 '✅ 수정 반영'을 한 번만 누르면** 한꺼번에 적용돼요 "
+                           "(칸마다 바로바로 재실행되지 않아 빨라요).")
+                with st.form(key=f"results_form_{hash(row_id)}"):
+                    results_edited = st.data_editor(
+                        looked_up[edit_cols], use_container_width=True, hide_index=True, num_rows="fixed",
+                        column_config={
+                            "af": st.column_config.TextColumn("AF코드", disabled=True),
+                            "bpu": st.column_config.TextColumn("BPU", disabled=True),
+                            "stype": st.column_config.TextColumn("발송유형", disabled=True),
+                            "brand": st.column_config.TextColumn("브랜드", disabled=True),
+                            "send": st.column_config.NumberColumn("발송모수"),
+                            "uv": st.column_config.NumberColumn("UV"),
+                            "visit": st.column_config.NumberColumn("VISIT"),
+                            "cust": st.column_config.NumberColumn("고객수"),
+                            "oc": st.column_config.NumberColumn("주문건수"),
+                            "amt": st.column_config.NumberColumn("거래액"),
+                        }, key=f"results_editor_{hash(row_id)}")
+                    applied = st.form_submit_button("✅ 수정 반영")
+
+                if applied:
+                    st.session_state.results_override = results_edited.copy()
+                    st.session_state.results_override_id = row_id
+
+                override = st.session_state.get("results_override")
+                if override is not None and st.session_state.get("results_override_id") == row_id:
+                    final_rows = looked_up.copy()
+                    for c in ("send", "uv", "visit", "cust", "oc", "amt"):
+                        final_rows[c] = override[c].values
+                    final_rows = compute_ratio_cols(final_rows)
+                else:
+                    final_rows = looked_up
 
                 st.markdown("**최종 계산값** (저장하기를 누르면 이 값이 저장돼요)")
                 show = final_rows.rename(columns={**METRIC_LABELS, "af": "AF코드", "bpu": "BPU", "stype": "발송유형",
@@ -1272,9 +1285,13 @@ def main():
                     storage_save(BK, merged)
                     st.success(f"{len(final_rows):,}건 저장 완료 (누적 {len(merged):,}건)")
                     st.session_state.manual_editor_ver += 1
+                    st.session_state.pop("results_override", None)
+                    st.session_state.pop("results_override_id", None)
                     st.rerun()
             if c2.button("↺ 비우기", use_container_width=True):
                 st.session_state.manual_editor_ver += 1
+                st.session_state.pop("results_override", None)
+                st.session_state.pop("results_override_id", None)
                 st.rerun()
 
     # ══════════════════════════════════════════════════════════
