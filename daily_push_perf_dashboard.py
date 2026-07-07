@@ -1073,9 +1073,14 @@ def main():
 
         st.markdown("#### BPU 드릴다운")
         pick = st.selectbox("BPU 선택", gs["bpu_group"].tolist())
-        drill = agg_metrics(f[f["bpu_group"] == pick], ["brand"]).sort_values("amt", ascending=False).head(15)
-        st.dataframe(drill.rename(columns={**METRIC_LABELS, "brand": "브랜드", "n": "캠페인수"}),
-                     use_container_width=True, hide_index=True)
+        picked_df = f[f["bpu_group"] == pick]
+        tab_brand, tab_cat, tab_attr = st.tabs(["브랜드", "카테고리", "속성"])
+        drill_specs = [(tab_brand, "brand", "브랜드"), (tab_cat, "cat", "카테고리"), (tab_attr, "attr", "속성")]
+        for tab, col, label in drill_specs:
+            with tab:
+                drill = agg_metrics(picked_df, [col]).sort_values("amt", ascending=False).head(15)
+                st.dataframe(drill.rename(columns={**METRIC_LABELS, col: label, "n": "캠페인수"}),
+                             use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 발송유형별 실적
