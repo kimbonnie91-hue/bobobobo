@@ -846,16 +846,24 @@ def gs_worksheet_by_gid(sh, gid):
 
 
 def load_plan_rows_from_gsheet(creds_dict, spreadsheet, gid):
-    """발송 계획 시트에서 요일/시간대/발송모수 외 항목이 모두 채워진 행만 읽어온다."""
+    """발송 계획 시트에서 (필터 적용 전) 헤더 인식·컬럼 매핑까지 마친 원본 행을 읽어온다.
+    필터는 filter_complete_plan_rows에서 별도로 건다 (진단 메시지에서 필터 전/후를 구분해 보여주기 위함)."""
     sh = gs_open(creds_dict, spreadsheet)
     ws = gs_worksheet_by_gid(sh, gid)
     if ws is None:
         raise ValueError(f"gid={gid} 탭을 찾을 수 없어요. 시트 URL의 gid를 확인해주세요.")
     rows = ws.get_all_values()
-    parsed = parse_material_rows(rows)
-    if parsed.empty:
-        return parsed
-    return filter_complete_plan_rows(parsed)
+    return parse_material_rows(rows)
+
+
+def plan_rows_blank_summary(df, required=PLAN_SHEET_REQUIRED):
+    """필수 항목별로 빈 칸인 행이 몇 개인지 — 어떤 컬럼 때문에 필터링되는지 진단용."""
+    n = len(df)
+    recs = []
+    for col in required:
+        blanks = n if (n == 0 or col not in df.columns) else int(df[col].map(_is_blank).sum())
+        recs.append({"컬럼": col, "빈칸 행수": blanks, "전체 행수": n})
+    return pd.DataFrame(recs)
 
 
 def plan_rows_to_editor_df(parsed):
@@ -1348,24 +1356,35 @@ def main():
                         st.error("구글시트 연동이 설정돼 있지 않아요 (Secrets에 gcp_service_account가 필요해요).")
                     else:
                         try:
-                            new_rows = load_plan_rows_from_gsheet(
+                            raw_rows = load_plan_rows_from_gsheet(
                                 st.secrets["gcp_service_account"], PLAN_SHEET_URL, PLAN_SHEET_GID)
                         except Exception as e:
                             msg = str(e)[:150].strip() or type(e).__name__
                             st.error(f"구글시트에서 불러오기 실패: {msg}")
                         else:
-                            if new_rows.empty:
-                                st.warning("불러올 수 있는 행이 없어요 (조건을 만족하는 행이 없거나 시트가 비어 있어요).")
+                            if raw_rows.empty:
+                                st.warning("시트에서 읽은 행이 없어요. gid가 맞는지, 표 위쪽 10행 안에 "
+                                          "'일자'·'AF코드' 같은 헤더 행이 있는지 확인해주세요.")
                             else:
-                                editor_rows = plan_rows_to_editor_df(new_rows)
-                                existing = st.session_state.get("plan_import_rows")
-                                combined = (pd.concat([existing, editor_rows], ignore_index=True)
-                                           if existing is not None and not existing.empty else editor_rows)
-                                combined = combined[~store_key_frame(combined).duplicated(keep="last")].reset_index(drop=True)
-                                st.session_state.plan_import_rows = combined
-                                st.session_state.manual_editor_ver += 1
-                                st.success(f"{len(editor_rows):,}건을 불러왔어요 (누적 {len(combined):,}건).")
-                                st.rerun()
+                                new_rows = filter_complete_plan_rows(raw_rows)
+                                if new_rows.empty:
+                                    st.warning(f"시트에서 {len(raw_rows):,}행을 읽었지만, 요일/시간대/발송모수를 뺀 "
+                                              "나머지 항목이 모두 채워진 행이 없어요. 항목별로 빈 칸인 행이 몇 개인지 "
+                                              "아래에서 확인해 보세요.")
+                                    st.dataframe(plan_rows_blank_summary(raw_rows), hide_index=True,
+                                                use_container_width=True)
+                                    with st.expander("읽어온 원본 미리보기 (최대 10행)"):
+                                        st.dataframe(raw_rows.head(10), use_container_width=True)
+                                else:
+                                    editor_rows = plan_rows_to_editor_df(new_rows)
+                                    existing = st.session_state.get("plan_import_rows")
+                                    combined = (pd.concat([existing, editor_rows], ignore_index=True)
+                                               if existing is not None and not existing.empty else editor_rows)
+                                    combined = combined[~store_key_frame(combined).duplicated(keep="last")].reset_index(drop=True)
+                                    st.session_state.plan_import_rows = combined
+                                    st.session_state.manual_editor_ver += 1
+                                    st.success(f"{len(editor_rows):,}건을 불러왔어요 (누적 {len(combined):,}건).")
+                                    st.rerun()
 
             if "manual_editor_ver" not in st.session_state:
                 st.session_state.manual_editor_ver = 0
