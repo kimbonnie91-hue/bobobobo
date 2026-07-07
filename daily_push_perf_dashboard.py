@@ -1275,11 +1275,24 @@ def main():
                 }), use_container_width=True, hide_index=True)
 
                 st.markdown("#### 일자별 상세")
-                detail = cf.sort_values("dt", ascending=False)[
+                weeks_sorted = cf[["week_start", "week_label"]].drop_duplicates().sort_values("week_start")
+                d1, d2 = st.columns(2)
+                brand_pick = d1.multiselect("브랜드", sorted([b for b in cf["brand"].unique() if b]),
+                                            key="camp_detail_brand_pick")
+                week_pick = d2.multiselect("주차", weeks_sorted["week_label"].tolist(),
+                                           key="camp_detail_week_pick")
+                detail_f = cf
+                if brand_pick:
+                    detail_f = detail_f[detail_f["brand"].isin(brand_pick)]
+                if week_pick:
+                    detail_f = detail_f[detail_f["week_label"].isin(week_pick)]
+
+                detail = detail_f.sort_values("dt", ascending=False)[
                     ["date", "week_label", "stype", "cat", "brand", "af", "send", "uv", "oc", "amt"]]
                 show_detail = detail.rename(columns={"date": "일자", "week_label": "주차", "stype": "발송유형",
                                                      "cat": "카테고리", "brand": "브랜드", "af": "AF코드",
                                                      **METRIC_LABELS})
+                st.caption(f"{len(show_detail):,}행")
                 st.dataframe(show_detail.style.format({
                     "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
