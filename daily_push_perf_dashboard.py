@@ -809,6 +809,68 @@ def gs_clear_ws(sh, title, cols):
         pass
 
 
+# ── '발송 계획' 구글시트 불러오기 (예: APP PUSH 발송 시트의 '기본 발송' 탭) ─────
+# 시트 컬럼(일자/요일/시간대/타겟구분/발송유형/BPU/우선순위/카테고리/속성/담당자/브랜드/
+# AF코드/기획전No./발송모수)이 COLMAP_CANDIDATES와 1:1로 맞아 parse_material_rows를 그대로 쓴다.
+PLAN_SHEET_URL = "https://docs.google.com/spreadsheets/d/1xqlaRnHa5HMLz3ASUn-H7AvMkUsvQw6l7aw1rWLqfjw/edit?gid=147510377#gid=147510377"
+PLAN_SHEET_GID = "147510377"
+# 요일/시간대는 (병합된 셀 등으로) 비어 있을 수 있어 제외한다. 발송모수는 나중에 '자동 조회'로
+# 채워지는 실적값이라 계획 단계에서는 비어 있는 게 정상이라 마찬가지로 제외한다.
+PLAN_SHEET_REQUIRED = ["target", "stype", "bpu", "prio", "cat", "attr", "owner", "brand", "af", "promo"]
+
+
+def _is_blank(v):
+    if v is None:
+        return True
+    s = str(v).strip()
+    return s == "" or s.lower() in ("nan", "none", "-")
+
+
+def filter_complete_plan_rows(df, required=PLAN_SHEET_REQUIRED):
+    """요일/시간대/발송모수 외 계획 항목이 하나라도 빈 칸인 행은 자동 불러오기에서 제외한다."""
+    if df.empty:
+        return df
+    mask = pd.Series(True, index=df.index)
+    for col in required:
+        mask &= (~df[col].map(_is_blank)) if col in df.columns else False
+    return df[mask].reset_index(drop=True)
+
+
+def gs_worksheet_by_gid(sh, gid):
+    """gid(워크시트 ID)로 특정 탭을 찾는다. 못 찾으면 None."""
+    gid = str(gid)
+    for ws in sh.worksheets():
+        if str(ws.id) == gid:
+            return ws
+    return None
+
+
+def load_plan_rows_from_gsheet(creds_dict, spreadsheet, gid):
+    """발송 계획 시트에서 요일/시간대/발송모수 외 항목이 모두 채워진 행만 읽어온다."""
+    sh = gs_open(creds_dict, spreadsheet)
+    ws = gs_worksheet_by_gid(sh, gid)
+    if ws is None:
+        raise ValueError(f"gid={gid} 탭을 찾을 수 없어요. 시트 URL의 gid를 확인해주세요.")
+    rows = ws.get_all_values()
+    parsed = parse_material_rows(rows)
+    if parsed.empty:
+        return parsed
+    return filter_complete_plan_rows(parsed)
+
+
+def plan_rows_to_editor_df(parsed):
+    """불러온 계획 행 → 직접입력 표(STORE_COLS 전체)에 넣을 수 있는 형태로 정리."""
+    d = parsed.copy()
+    for c in STORE_COLS:
+        if c not in d.columns:
+            d[c] = np.nan if c in NUM_COLS else ""
+    for c in NUM_COLS:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    for c in TXT_COLS + ["af", "date"]:
+        d[c] = d[c].apply(lambda v: "" if v is None else str(v).strip())
+    return d[STORE_COLS].reset_index(drop=True)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 2. Streamlit 앱
 # ══════════════════════════════════════════════════════════════════════
@@ -1272,9 +1334,44 @@ def main():
                       "자동 조회돼요 (회색으로 비활성화된 컬럼). **발송모수**는 직접 입력한 값이 있으면 그 값을 우선 쓰고, "
                       "비워두면 '발송 건수' 표에서 자동 조회해요 — 값을 바꾸면 유입전환율/주문전환율/효율도 그에 맞게 다시 계산돼요. "
                       "행 추가는 표 맨 아래 + 를 누르면 돼요.")
+
+            with st.expander("☁️ 구글 발송 계획 시트에서 불러오기"):
+                st.caption("요일·시간대는 비어 있어도 불러오지만, 그 외 항목(타겟구분/발송유형/BPU/우선순위/"
+                          "카테고리/속성/담당자/브랜드/AF코드/기획전No.) 중 하나라도 빈 칸인 행은 불러오지 않아요. "
+                          "발송모수는 이후 자동 조회로 채워지는 값이라 확인하지 않아요.")
+                if st.button("📥 불러오기", key="plan_sheet_import"):
+                    try:
+                        has_creds = "gcp_service_account" in st.secrets
+                    except Exception:
+                        has_creds = False
+                    if not has_creds:
+                        st.error("구글시트 연동이 설정돼 있지 않아요 (Secrets에 gcp_service_account가 필요해요).")
+                    else:
+                        try:
+                            new_rows = load_plan_rows_from_gsheet(
+                                st.secrets["gcp_service_account"], PLAN_SHEET_URL, PLAN_SHEET_GID)
+                        except Exception as e:
+                            msg = str(e)[:150].strip() or type(e).__name__
+                            st.error(f"구글시트에서 불러오기 실패: {msg}")
+                        else:
+                            if new_rows.empty:
+                                st.warning("불러올 수 있는 행이 없어요 (조건을 만족하는 행이 없거나 시트가 비어 있어요).")
+                            else:
+                                editor_rows = plan_rows_to_editor_df(new_rows)
+                                existing = st.session_state.get("plan_import_rows")
+                                combined = (pd.concat([existing, editor_rows], ignore_index=True)
+                                           if existing is not None and not existing.empty else editor_rows)
+                                combined = combined[~store_key_frame(combined).duplicated(keep="last")].reset_index(drop=True)
+                                st.session_state.plan_import_rows = combined
+                                st.session_state.manual_editor_ver += 1
+                                st.success(f"{len(editor_rows):,}건을 불러왔어요 (누적 {len(combined):,}건).")
+                                st.rerun()
+
             if "manual_editor_ver" not in st.session_state:
                 st.session_state.manual_editor_ver = 0
-            edited = st.data_editor(blank_row_df(), num_rows="dynamic", use_container_width=True, height=280,
+            imported_rows = st.session_state.get("plan_import_rows")
+            initial_rows = imported_rows if imported_rows is not None and not imported_rows.empty else blank_row_df()
+            edited = st.data_editor(initial_rows, num_rows="dynamic", use_container_width=True, height=280,
                                     column_config=store_column_config(disabled=AUTO_LOOKUP_COLS),
                                     key=f"manual_editor_{st.session_state.manual_editor_ver}")
 
@@ -1345,11 +1442,13 @@ def main():
                     st.session_state.manual_editor_ver += 1
                     st.session_state.pop("results_override", None)
                     st.session_state.pop("results_override_id", None)
+                    st.session_state.pop("plan_import_rows", None)
                     st.rerun()
             if c2.button("↺ 비우기", use_container_width=True):
                 st.session_state.manual_editor_ver += 1
                 st.session_state.pop("results_override", None)
                 st.session_state.pop("results_override_id", None)
+                st.session_state.pop("plan_import_rows", None)
                 st.rerun()
 
     # ══════════════════════════════════════════════════════════
