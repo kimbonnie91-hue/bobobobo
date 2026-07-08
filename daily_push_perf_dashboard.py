@@ -1099,9 +1099,10 @@ def main():
 
         st.markdown("---")
         metric = st.selectbox("추이 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k], key="sum_metric")
-        daily = f.groupby(f["dt"].dt.date)[metric].sum().reset_index()
-        fig = go.Figure(go.Scatter(x=daily["dt"], y=daily[metric], mode="lines+markers", line=dict(color="#4f8fff", width=2)))
-        fig.update_layout(**base_layout(title=f"일자별 {METRIC_LABELS[metric]} 추이"))
+        weekly = f.groupby(["week_start", "week_label"], dropna=False)[metric].sum().reset_index().sort_values("week_start")
+        fig = go.Figure(go.Scatter(x=weekly["week_label"], y=weekly[metric], mode="lines+markers",
+                                   line=dict(color="#4f8fff", width=2)))
+        fig.update_layout(**base_layout(title=f"주차별 {METRIC_LABELS[metric]} 추이"))
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 전주 대비")
