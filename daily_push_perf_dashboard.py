@@ -1098,11 +1098,20 @@ def main():
         c7.metric("RPS(발송당거래액)", f"{(amt_t/send_t if send_t else 0):,.0f}")
 
         st.markdown("---")
-        metric = st.selectbox("추이 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k], key="sum_metric")
-        weekly = f.groupby(["week_start", "week_label"], dropna=False)[metric].sum().reset_index().sort_values("week_start")
+        TREND_METRIC_LABELS = {**METRIC_LABELS, "ctr": "CTR(UV/발송)", "cvr": "CR(주문/UV)"}
+        metric = st.selectbox("추이 지표", list(TREND_METRIC_LABELS), format_func=lambda k: TREND_METRIC_LABELS[k],
+                              key="sum_metric")
+        weekly = f.groupby(["week_start", "week_label"], dropna=False).agg(
+            send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+        weekly = weekly.sort_values("week_start")
+        weekly["ctr"] = np.where(weekly["send"] > 0, weekly["uv"] / weekly["send"], np.nan)
+        weekly["cvr"] = np.where(weekly["uv"] > 0, weekly["oc"] / weekly["uv"], np.nan)
         fig = go.Figure(go.Scatter(x=weekly["week_label"], y=weekly[metric], mode="lines+markers",
                                    line=dict(color="#4f8fff", width=2)))
-        fig.update_layout(**base_layout(title=f"주차별 {METRIC_LABELS[metric]} 추이"))
+        layout_kwargs = base_layout(title=f"주차별 {TREND_METRIC_LABELS[metric]} 추이")
+        if metric in ("ctr", "cvr"):
+            layout_kwargs["yaxis"]["tickformat"] = ".1%"
+        fig.update_layout(**layout_kwargs)
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 전주 대비")
@@ -1117,8 +1126,25 @@ def main():
             cv, pv = cur[k].sum(), prev[k].sum()
             delta = (cv - pv) / pv * 100 if pv else np.nan
             rows.append({"지표": label, "이번주(최근7일)": cv, "전주": pv, "증감%": delta})
-        st.dataframe(pd.DataFrame(rows).style.format({"이번주(최근7일)": "{:,.0f}", "전주": "{:,.0f}", "증감%": "{:+.1f}%"}),
-                     use_container_width=True, hide_index=True)
+        n_count_rows = len(rows)
+        cur_send, prev_send = cur["send"].sum(), prev["send"].sum()
+        cur_uv, prev_uv = cur["uv"].sum(), prev["uv"].sum()
+        cur_oc, prev_oc = cur["oc"].sum(), prev["oc"].sum()
+        ctr_cur = cur_uv / cur_send if cur_send else np.nan
+        ctr_prev = prev_uv / prev_send if prev_send else np.nan
+        cr_cur = cur_oc / cur_uv if cur_uv else np.nan
+        cr_prev = prev_oc / prev_uv if prev_uv else np.nan
+        rows.append({"지표": "CTR(UV/발송)", "이번주(최근7일)": ctr_cur, "전주": ctr_prev,
+                    "증감%": ((ctr_cur - ctr_prev) / ctr_prev * 100 if prev_send and ctr_prev else np.nan)})
+        rows.append({"지표": "CR(주문/UV)", "이번주(최근7일)": cr_cur, "전주": cr_prev,
+                    "증감%": ((cr_cur - cr_prev) / cr_prev * 100 if prev_uv and cr_prev else np.nan)})
+        show = pd.DataFrame(rows)
+        sty = show.style.format({"이번주(최근7일)": "{:,.0f}", "전주": "{:,.0f}"},
+                                subset=pd.IndexSlice[0:n_count_rows - 1, ["이번주(최근7일)", "전주"]])
+        sty = sty.format({"이번주(최근7일)": "{:.2%}", "전주": "{:.2%}"},
+                         subset=pd.IndexSlice[n_count_rows:n_count_rows + 1, ["이번주(최근7일)", "전주"]])
+        sty = sty.format({"증감%": "{:+.1f}%"}, subset=pd.IndexSlice[:, ["증감%"]])
+        st.dataframe(sty, use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # BPU별 실적
