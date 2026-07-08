@@ -458,6 +458,16 @@ def load_excel_perf(file_bytes):
         wb.close()
 
 
+def _txt_val(v):
+    """텍스트 컬럼 정리 — CSV 왕복 후 결측이 None 대신 NaN(float)으로 오거나, 숫자로만 된 값이
+    112864.0처럼 float로 캐스팅돼 들어와도 "nan"/".0" 없이 깔끔한 문자열로 만든다."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    return str(v).strip()
+
+
 def _norm_bpu_group(v):
     """세부 BPU 코드(1BPU_B, 1BPU_C, 3BPU_B, 4BPU_A 등)를 대표 BPU(1BPU/3BPU/4BPU)로 묶는다.
     '마케팅'/'편성'/'브랜드컨텐츠'/'2BPU'처럼 접미사가 없는 값은 그대로 둔다."""
@@ -482,7 +492,7 @@ def _finalize(df):
             df[c] = pd.to_numeric(df[c], errors="coerce")
     for c in TXT_COLS:
         if c in df:
-            df[c] = df[c].apply(lambda v: "" if v is None else str(v).strip())
+            df[c] = df[c].apply(_txt_val)
         else:
             df[c] = ""
     df["bpu_group"] = df["bpu"].map(_norm_bpu_group)
@@ -1056,7 +1066,8 @@ def main():
         st.sidebar.caption("아직 데이터가 없어요. '✍️ 직접 입력'에서 바로 추가하거나 엑셀을 업로드해 보세요.")
         f = df.copy()
 
-    pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "주차별 누적 추이", "AF코드별 리더보드", "✍️ 직접 입력", "데이터"]
+    pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
+             "AF코드별 리더보드", "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
     if df.empty and page not in ("✍️ 직접 입력", "데이터"):
@@ -1324,6 +1335,28 @@ def main():
                     "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
                     "CTR": "{:.2%}", "CR": "{:.2%}", "효율": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════════════
+    # 일자별 실적 — 왼쪽 필터가 적용된 데이터를 행 단위(일자+시간대+AF코드)로 그대로 본다
+    # ══════════════════════════════════════════════════════════
+    elif page == "일자별 실적":
+        st.title("일자별 실적")
+        st.caption("왼쪽 필터(기간/BPU/발송유형/검색)가 적용된 데이터를 일자 단위 행으로 봐요.")
+        if f.empty:
+            st.info("표시할 데이터가 없어요.")
+        else:
+            detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo",
+                          "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
+            detail = f.sort_values("dt", ascending=False)[detail_cols]
+            show = detail.rename(columns={"date": "일자", "hour": "시간대", "bpu_group": "BPU", "cat": "카테고리",
+                                          "brand": "브랜드", "owner": "담당자", "promo": "기획전",
+                                          "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
+                                          "oc": "주문건수", "amt": "거래액", "cvr": "CR", "ctr": "CTR", "rps": "효율"})
+            st.caption(f"{len(show):,}행")
+            st.dataframe(show.style.format({
+                "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
+                "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
+            }), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 주차별 누적 추이
