@@ -1288,13 +1288,13 @@ def main():
                     detail_f = detail_f[detail_f["week_label"].isin(week_pick)]
 
                 detail = detail_f.sort_values("dt", ascending=False)[
-                    ["date", "week_label", "stype", "cat", "brand", "af", "send", "uv", "oc", "amt"]]
-                show_detail = detail.rename(columns={"date": "일자", "week_label": "주차", "stype": "발송유형",
-                                                     "cat": "카테고리", "brand": "브랜드", "af": "AF코드",
-                                                     **METRIC_LABELS})
+                    ["date", "hour", "week_label", "stype", "cat", "brand", "af", "send", "uv", "oc", "amt"]]
+                show_detail = detail.rename(columns={"date": "일자", "hour": "시간대", "week_label": "주차",
+                                                     "stype": "발송유형", "cat": "카테고리", "brand": "브랜드",
+                                                     "af": "AF코드", **METRIC_LABELS})
                 st.caption(f"{len(show_detail):,}행")
                 st.dataframe(show_detail.style.format({
-                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                    "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
