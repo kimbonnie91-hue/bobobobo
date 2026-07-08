@@ -1345,9 +1345,17 @@ def main():
         if f.empty:
             st.info("표시할 데이터가 없어요.")
         else:
+            search = st.text_input("검색 (BPU/카테고리/브랜드/담당자/기획전/AF코드)", "", key="daily_detail_search")
+            df_detail = f
+            if search:
+                q = re.escape(search.lower())
+                hay = (df_detail["bpu_group"] + " " + df_detail["cat"] + " " + df_detail["brand"] + " " +
+                      df_detail["owner"] + " " + df_detail["promo"] + " " + df_detail["af"]).str.lower()
+                df_detail = df_detail[hay.str.contains(q, na=False)]
+
             detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo",
                           "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
-            detail = f.sort_values("dt", ascending=False)[detail_cols]
+            detail = df_detail.sort_values("dt", ascending=False)[detail_cols]
             show = detail.rename(columns={"date": "일자", "hour": "시간대", "bpu_group": "BPU", "cat": "카테고리",
                                           "brand": "브랜드", "owner": "담당자", "promo": "기획전",
                                           "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
