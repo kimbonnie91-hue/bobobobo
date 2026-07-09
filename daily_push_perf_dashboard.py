@@ -159,7 +159,7 @@ RAWNEW_CANDIDATES = {
     "visit": ["SV"],
     "cust": ["CUST_CNT"],
     "oc": ["ORD_CNT"],
-    "amt": ["ORD_AMT"],
+    "amt": ["SALE_AMT"],
 }
 # '기획' 발송의 캠페인명은 "REAL_20260629_0800_기본발송_편성_112512" 형태(시간대_발송유형_BPU_기획전No)로
 # 템플릿화되어 있어 브랜드명이 아니다 — 이 패턴이 매칭되면 브랜드로 쓰지 않고 메타로만 활용한다.
@@ -278,6 +278,8 @@ def build_from_raw_query_sheets(send_count_raw, rawnew_raw, meta_lookup=None):
     perf_agg = pd.DataFrame(columns=["date", "af", "uv", "visit", "cust", "oc", "amt"])
     if has_perf:
         r = rawnew_raw.copy()
+        if "sale_amt" in r.columns:
+            r["amt"] = r["sale_amt"]
         for c in ("uv", "visit", "cust", "oc", "amt"):
             r[c] = pd.to_numeric(r[c], errors="coerce")
         r["chnl_norm"] = r["chnl"].astype(str).str.strip().str.lower()
@@ -677,6 +679,8 @@ def lookup_send_uv_etc(meta_df, send_log_df, rawnew_df):
         r = rawnew_df.dropna(subset=["date"]).copy()
         r = r[r["af"].astype(str).str.strip() != ""]
         if not r.empty:
+            if "sale_amt" in r.columns:
+                r["amt"] = r["sale_amt"]
             for c in ("uv", "visit", "cust", "oc", "amt"):
                 r[c] = pd.to_numeric(r[c], errors="coerce")
             r["chnl_norm"] = r["chnl"].astype(str).str.strip().str.lower()
@@ -1082,7 +1086,7 @@ def main():
 
 **우선순위 2 — 위 시트가 없거나 거기 없는 일자·AF코드는 원본 쿼리에서 직접 집계**
 - **'발송 건수'** 시트: 발송일시/캠페인명/AF코드/모수 컬럼 → (일자,AF코드)별 발송모수로 집계
-- **'RawNew'** 시트: STD_DD/AF_CD/CHNL_DTL_CD/UV/SV/CUST_CNT/ORD_CNT/ORD_AMT 컬럼 → (일자,AF코드)별
+- **'RawNew'** 시트: STD_DD/AF_CD/CHNL_DTL_CD/UV/SV/CUST_CNT/ORD_CNT/SALE_AMT 컬럼 → (일자,AF코드)별
   UV/VISIT/고객수/주문건수/거래액으로 집계 (CHNL_DTL_CD='Total' 행이 있으면 그것만 사용해 중복 합산 방지)
 - 같은 이름의 RawNew 시트가 여러 개 있어도(예: 트레일링 스페이스) 날짜가 최신인 쪽을 자동으로 골라요.
 - BPU/발송유형/기획전No.는 캠페인명이 `이름_일자_시간_발송유형_BPU_기획전No` 패턴이면 자동 추출하고,
