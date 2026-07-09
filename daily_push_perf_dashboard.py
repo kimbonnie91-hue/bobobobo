@@ -893,13 +893,20 @@ def plan_rows_to_editor_df(parsed):
     return d[STORE_COLS].reset_index(drop=True)
 
 
-# ── '요청문구' 시트 (같은 스프레드시트, 다른 탭) — 기획전No.(promo) 기준으로 제목/내용을 매칭 ──
+# ── '요청문구' 시트 (기본값은 발송계획과 같은 스프레드시트, 다른 탭) — 기획전No.(promo) 기준으로
+# 제목/내용을 매칭. 사용자가 "일자별 실적" 페이지에서 다른 스프레드시트로 바꿔 연결할 수도 있다.
 REQUEST_COPY_GID = "1864635721"
 REQUEST_COPY_CANDIDATES = {
     "promo": ["기획전번호", "기획전 번호"],
     "title": ["제목"],
     "content": ["내용"],
 }
+
+
+def _parse_sheet_url_gid(url):
+    """구글시트 URL에서 gid를 추출한다 (예: '...edit?gid=123#gid=123' → '123'). 없으면 None."""
+    m = re.search(r"[#&?]gid=(\d+)", str(url or ""))
+    return m.group(1) if m else None
 
 
 def _merge_header_rows(rows):
@@ -1016,10 +1023,20 @@ def main():
     @st.cache_data(ttl=300, show_spinner=False)
     def _load_request_copy_cached(_email, spreadsheet, gid):
         sh = _get_sh(_email, spreadsheet)
-        ws = gs_worksheet_by_gid(sh, gid)
+        ws = gs_worksheet_by_gid(sh, gid) if gid else sh.sheet1
         if ws is None:
             return pd.DataFrame(columns=["promo", "title", "content"])
         return parse_request_copy_rows(ws.get_all_values())
+
+    def request_copy_source():
+        """세션에서 사용자가 직접 연결한 시트가 있으면 그걸, 없으면 기본 시트를 돌려준다.
+        직접 연결한 시트인데 URL에 gid가 없으면(gid=None) 그 시트의 첫 번째 탭을 쓴다 —
+        기본 시트 전용 gid(REQUEST_COPY_GID)로 잘못 폴백하면 안 되므로 분기를 분리한다."""
+        is_custom = "request_copy_url" in st.session_state
+        if is_custom:
+            return st.session_state.get("request_copy_url") or PLAN_SHEET_URL, \
+                   st.session_state.get("request_copy_gid"), True
+        return PLAN_SHEET_URL, REQUEST_COPY_GID, False
 
     def load_request_copy_map():
         """'요청문구' 시트를 읽어 {기획전No.: {title, content}} 형태로 돌려준다.
@@ -1030,9 +1047,10 @@ def main():
             has_creds = False
         if not has_creds:
             return {}, None
+        url, gid, _ = request_copy_source()
         try:
             rc_df = _load_request_copy_cached(
-                st.secrets["gcp_service_account"].get("client_email", ""), PLAN_SHEET_URL, REQUEST_COPY_GID)
+                st.secrets["gcp_service_account"].get("client_email", ""), url, gid)
         except Exception as e:
             return {}, (str(e)[:120].strip() or type(e).__name__)
         if rc_df.empty:
@@ -1430,6 +1448,28 @@ def main():
     elif page == "일자별 실적":
         st.title("일자별 실적")
         st.caption("왼쪽 필터(기간/BPU/발송유형/검색)가 적용된 데이터를 일자 단위 행으로 봐요.")
+
+        cur_url, cur_gid, is_custom = request_copy_source()
+        with st.expander("🔗 요청문구 구글시트 연결", expanded=is_custom):
+            st.caption(("현재 **직접 연결한 시트**를 쓰고 있어요." if is_custom else
+                       "현재 **기본 시트**(발송 계획과 같은 스프레드시트의 '요청문구' 탭)를 쓰고 있어요.") +
+                      " 다른 구글시트를 연결하려면 URL을 붙여넣어 주세요 (URL에 `#gid=...`가 있으면 그 "
+                      "탭을, 없으면 첫 번째 탭을 읽어요). 기획전No./제목/내용 컬럼이 있어야 인식돼요. "
+                      "서비스 계정 이메일에 뷰어 권한 공유가 필요해요.")
+            url_input = st.text_input("구글시트 URL", value=cur_url, key="request_copy_url_input")
+            b1, b2 = st.columns(2)
+            if b1.button("🔗 연결", key="request_copy_connect", use_container_width=True):
+                st.session_state.request_copy_url = url_input.strip()
+                st.session_state.request_copy_gid = _parse_sheet_url_gid(url_input)
+                _load_request_copy_cached.clear()
+                st.rerun()
+            if b2.button("↺ 기본 시트로 되돌리기", key="request_copy_reset", use_container_width=True,
+                        disabled=not is_custom):
+                st.session_state.pop("request_copy_url", None)
+                st.session_state.pop("request_copy_gid", None)
+                _load_request_copy_cached.clear()
+                st.rerun()
+
         if f.empty:
             st.info("표시할 데이터가 없어요.")
         else:
