@@ -1473,8 +1473,11 @@ def main():
         if f.empty:
             st.info("표시할 데이터가 없어요.")
         else:
-            c1, c2, c3 = st.columns(3)
+            c0, c1, c2, c3 = st.columns(4)
             c4, c5, c6 = st.columns(3)
+            dmin_d, dmax_d = f["dt"].min().date(), f["dt"].max().date()
+            date_pick = c0.date_input("일자", value=(dmin_d, dmax_d), min_value=dmin_d, max_value=dmax_d,
+                                      key="daily_date_pick")
             bpu_pick = c1.multiselect("BPU", sorted([v for v in f["bpu_group"].unique() if v]), key="daily_bpu_pick")
             cat_pick = c2.multiselect("카테고리", sorted([v for v in f["cat"].unique() if v]), key="daily_cat_pick")
             brand_pick = c3.multiselect("브랜드", sorted([v for v in f["brand"].unique() if v]), key="daily_brand_pick")
@@ -1483,6 +1486,8 @@ def main():
             af_pick = c6.multiselect("AF코드", sorted([v for v in f["af"].unique() if v]), key="daily_af_pick")
 
             df_detail = f
+            if isinstance(date_pick, tuple) and len(date_pick) == 2:
+                df_detail = df_detail[(df_detail["dt"].dt.date >= date_pick[0]) & (df_detail["dt"].dt.date <= date_pick[1])]
             if bpu_pick:
                 df_detail = df_detail[df_detail["bpu_group"].isin(bpu_pick)]
             if cat_pick:
