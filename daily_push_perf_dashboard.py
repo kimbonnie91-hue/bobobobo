@@ -893,6 +893,64 @@ def plan_rows_to_editor_df(parsed):
     return d[STORE_COLS].reset_index(drop=True)
 
 
+# ── '요청문구' 시트 (같은 스프레드시트, 다른 탭) — 기획전No.(promo) 기준으로 제목/내용을 매칭 ──
+REQUEST_COPY_GID = "1864635721"
+REQUEST_COPY_CANDIDATES = {
+    "promo": ["기획전번호", "기획전 번호"],
+    "title": ["제목"],
+    "content": ["내용"],
+}
+
+
+def _merge_header_rows(rows):
+    """'요청문구' 시트처럼 헤더가 병합 셀 때문에 여러 행에 걸쳐 나뉜 경우(위 행 '요청문구'가
+    제목/내용 두 칸에 걸쳐 병합, '기획전 번호'는 두 행에 걸쳐 병합 등), 각 컬럼별로 더 아래쪽
+    (더 구체적인) 행의 텍스트를 우선하고, 그 자리가 비어 있을 때만 위쪽 행 텍스트로 채운다."""
+    if not rows:
+        return []
+    width = max(len(r or []) for r in rows)
+    merged = [""] * width
+    for row in reversed(rows):
+        row = row or []
+        for i in range(width):
+            v = row[i] if i < len(row) else None
+            if v and not merged[i]:
+                merged[i] = str(v).strip()
+    return merged
+
+
+def parse_request_copy_rows(rows):
+    """'요청문구' 시트(기획전 번호/제목/내용) → 기획전No.(promo) 기준 문구 조회용 DataFrame."""
+    empty = pd.DataFrame(columns=["promo", "title", "content"])
+    if not rows:
+        return empty
+    best_idx, best_hdr_rows, best_score = None, 0, -1
+    for hdr_rows in (1, 2, 3):
+        if hdr_rows > len(rows):
+            break
+        merged = _merge_header_rows(rows[:hdr_rows])
+        idx = _map_columns(merged, candidates=REQUEST_COPY_CANDIDATES)
+        if len(idx) > best_score:
+            best_score, best_idx, best_hdr_rows = len(idx), idx, hdr_rows
+    if best_idx is None or "promo" not in best_idx:
+        return empty
+    idx = best_idx
+    recs = []
+    for row in rows[best_hdr_rows:]:
+        if row is None:
+            continue
+        n = len(row)
+        promo = _txt_val(row[idx["promo"]] if idx["promo"] < n else None)
+        if not promo:
+            continue
+        title = _txt_val(row[idx["title"]]) if "title" in idx and idx["title"] < n else ""
+        content = _txt_val(row[idx["content"]]) if "content" in idx and idx["content"] < n else ""
+        recs.append({"promo": promo, "title": title, "content": content})
+    if not recs:
+        return empty
+    return pd.DataFrame(recs).drop_duplicates(subset=["promo"], keep="last")
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 2. Streamlit 앱
 # ══════════════════════════════════════════════════════════════════════
@@ -954,6 +1012,32 @@ def main():
     @st.cache_resource(show_spinner=False)
     def _get_sh(_email, spreadsheet):
         return gs_open(st.secrets["gcp_service_account"], spreadsheet)
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _load_request_copy_cached(_email, spreadsheet, gid):
+        sh = _get_sh(_email, spreadsheet)
+        ws = gs_worksheet_by_gid(sh, gid)
+        if ws is None:
+            return pd.DataFrame(columns=["promo", "title", "content"])
+        return parse_request_copy_rows(ws.get_all_values())
+
+    def load_request_copy_map():
+        """'요청문구' 시트를 읽어 {기획전No.: {title, content}} 형태로 돌려준다.
+        시크릿 미설정/조회 실패 시 빈 dict + 에러 메시지(있으면)를 함께 준다."""
+        try:
+            has_creds = "gcp_service_account" in st.secrets
+        except Exception:
+            has_creds = False
+        if not has_creds:
+            return {}, None
+        try:
+            rc_df = _load_request_copy_cached(
+                st.secrets["gcp_service_account"].get("client_email", ""), PLAN_SHEET_URL, REQUEST_COPY_GID)
+        except Exception as e:
+            return {}, (str(e)[:120].strip() or type(e).__name__)
+        if rc_df.empty:
+            return {}, None
+        return rc_df.set_index("promo")[["title", "content"]].to_dict("index"), None
 
     def init_storage():
         try:
@@ -1372,11 +1456,19 @@ def main():
             if af_pick:
                 df_detail = df_detail[df_detail["af"].isin(af_pick)]
 
-            detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo",
+            request_copy_map, rc_err = load_request_copy_map()
+            if rc_err:
+                st.caption(f"⚠️ 요청문구 시트를 불러오지 못했어요 ({rc_err}) — 제목/내용 없이 표시해요.")
+            df_detail = df_detail.copy()
+            df_detail["title"] = df_detail["promo"].map(lambda p: request_copy_map.get(p, {}).get("title", ""))
+            df_detail["content"] = df_detail["promo"].map(lambda p: request_copy_map.get(p, {}).get("content", ""))
+
+            detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo", "title", "content",
                           "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
             detail = df_detail.sort_values("dt", ascending=False)[detail_cols]
             show = detail.rename(columns={"date": "일자", "hour": "시간대", "bpu_group": "BPU", "cat": "카테고리",
                                           "brand": "브랜드", "owner": "담당자", "promo": "기획전",
+                                          "title": "제목", "content": "내용",
                                           "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
                                           "oc": "주문건수", "amt": "거래액", "cvr": "CR", "ctr": "CTR", "rps": "효율"})
             st.caption(f"{len(show):,}행")
