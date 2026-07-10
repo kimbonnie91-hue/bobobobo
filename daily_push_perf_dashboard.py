@@ -898,7 +898,9 @@ def plan_rows_to_editor_df(parsed):
 # 제목/내용을 매칭. 사용자가 "일자별 실적" 페이지에서 다른 스프레드시트로 바꿔 연결할 수도 있다.
 REQUEST_COPY_GID = "1864635721"
 REQUEST_COPY_CANDIDATES = {
-    "promo": ["기획전번호", "기획전 번호"],
+    "date": ["일자(8자리)", "일자", "날짜"],
+    "hour": ["시간대", "시간"],
+    "promo": ["기획전번호", "기획전 번호", "우선순위기획전번호", "우선순위 기획전 번호"],
     "title": ["제목"],
     "content": ["내용"],
 }
@@ -927,11 +929,38 @@ def _merge_header_rows(rows):
     return merged
 
 
+def _norm_promo_val(v):
+    """'J_C_1_112026'처럼 접두어가 붙은 기획전 번호도 뒤쪽 숫자만 뽑아 우리 데이터의
+    기획전No.(promo, 예: '112026')와 같은 형식으로 맞춘다. 숫자로 안 끝나면 원래 텍스트 그대로."""
+    s = _txt_val(v)
+    if not s:
+        return ""
+    m = re.search(r"(\d+)$", s)
+    return m.group(1) if m else s
+
+
+def _norm_hour_val(v):
+    """시간대 값을 정수 문자열로 맞춘다 ('1600'/'1600.0'/1600 모두 '1600')."""
+    s = _txt_val(v)
+    if not s:
+        return ""
+    try:
+        return str(int(float(s)))
+    except (ValueError, TypeError):
+        return s
+
+
+# REQUEST_COPY 조회 키 우선순위 — 시트에 있는 컬럼만큼만 써서 매칭한다(모두 있으면 3개 다 사용,
+# 일자/시간대가 없으면 기획전 번호만으로 매칭 — parse_request_copy_rows의 반환값 key_cols 참고).
+REQUEST_COPY_KEY_ORDER = ["date", "hour", "promo"]
+
+
 def parse_request_copy_rows(rows):
-    """'요청문구' 시트(기획전 번호/제목/내용) → 기획전No.(promo) 기준 문구 조회용 DataFrame."""
-    empty = pd.DataFrame(columns=["promo", "title", "content"])
+    """'요청문구' 시트(일자/시간대/기획전 번호/제목/내용) → 조회용 DataFrame과, 실제로 시트에서
+    찾은 매칭 키 컬럼 목록(key_cols, 예: ['date','hour','promo'] 또는 ['promo']만)을 함께 돌려준다."""
+    empty = pd.DataFrame(columns=["date", "hour", "promo", "title", "content"])
     if not rows:
-        return empty
+        return empty, []
     best_idx, best_hdr_rows, best_score = None, 0, -1
     for hdr_rows in (1, 2, 3):
         if hdr_rows > len(rows):
@@ -941,22 +970,29 @@ def parse_request_copy_rows(rows):
         if len(idx) > best_score:
             best_score, best_idx, best_hdr_rows = len(idx), idx, hdr_rows
     if best_idx is None or "promo" not in best_idx:
-        return empty
+        return empty, []
     idx = best_idx
+    key_cols = [c for c in REQUEST_COPY_KEY_ORDER if c in idx]
     recs = []
     for row in rows[best_hdr_rows:]:
         if row is None:
             continue
         n = len(row)
-        promo = _txt_val(row[idx["promo"]] if idx["promo"] < n else None)
+        promo = _norm_promo_val(row[idx["promo"]] if idx["promo"] < n else None)
         if not promo:
             continue
-        title = _txt_val(row[idx["title"]]) if "title" in idx and idx["title"] < n else ""
-        content = _txt_val(row[idx["content"]]) if "content" in idx and idx["content"] < n else ""
-        recs.append({"promo": promo, "title": title, "content": content})
+        rec = {"promo": promo,
+               "title": _txt_val(row[idx["title"]]) if "title" in idx and idx["title"] < n else "",
+               "content": _txt_val(row[idx["content"]]) if "content" in idx and idx["content"] < n else ""}
+        if "date" in idx:
+            rec["date"] = _norm_date(row[idx["date"]] if idx["date"] < n else None) or ""
+        if "hour" in idx:
+            rec["hour"] = _norm_hour_val(row[idx["hour"]] if idx["hour"] < n else None)
+        recs.append(rec)
     if not recs:
-        return empty
-    return pd.DataFrame(recs).drop_duplicates(subset=["promo"], keep="last")
+        return empty, []
+    out = pd.DataFrame(recs).drop_duplicates(subset=key_cols, keep="last")
+    return out, key_cols
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1029,7 +1065,7 @@ def main():
         sh = _get_sh(_email, spreadsheet)
         ws = gs_worksheet_by_gid(sh, gid) if gid else sh.sheet1
         if ws is None:
-            return pd.DataFrame(columns=["promo", "title", "content"])
+            return pd.DataFrame(columns=["date", "hour", "promo", "title", "content"]), []
         return parse_request_copy_rows(ws.get_all_values())
 
     def request_copy_source():
@@ -1053,23 +1089,26 @@ def main():
         return PLAN_SHEET_URL, PLAN_SHEET_GID, False
 
     def load_request_copy_map():
-        """'요청문구' 시트를 읽어 {기획전No.: {title, content}} 형태로 돌려준다.
+        """'요청문구' 시트를 읽어 {키튜플: {title, content}} 형태와, 실제로 매칭에 쓸 키 컬럼
+        목록(예: ['date','hour','promo'] — 시트에 일자/시간대가 없으면 ['promo']만)을 함께 돌려준다.
         시크릿 미설정/조회 실패 시 빈 dict + 에러 메시지(있으면)를 함께 준다."""
         try:
             has_creds = "gcp_service_account" in st.secrets
         except Exception:
             has_creds = False
         if not has_creds:
-            return {}, None
+            return {}, [], None
         url, gid, _ = request_copy_source()
         try:
-            rc_df = _load_request_copy_cached(
+            rc_df, key_cols = _load_request_copy_cached(
                 st.secrets["gcp_service_account"].get("client_email", ""), url, gid)
         except Exception as e:
-            return {}, (str(e)[:120].strip() or type(e).__name__)
-        if rc_df.empty:
-            return {}, None
-        return rc_df.set_index("promo")[["title", "content"]].to_dict("index"), None
+            return {}, [], (str(e)[:120].strip() or type(e).__name__)
+        if rc_df.empty or not key_cols:
+            return {}, [], None
+        keys = list(rc_df[key_cols].itertuples(index=False, name=None))
+        values = rc_df[["title", "content"]].to_dict("records")
+        return dict(zip(keys, values)), key_cols, None
 
     def init_storage():
         try:
@@ -1518,12 +1557,31 @@ def main():
             if af_pick:
                 df_detail = df_detail[df_detail["af"].isin(af_pick)]
 
-            request_copy_map, rc_err = load_request_copy_map()
+            request_copy_map, rc_key_cols, rc_err = load_request_copy_map()
             if rc_err:
                 st.caption(f"⚠️ 요청문구 시트를 불러오지 못했어요 ({rc_err}) — 제목/내용 없이 표시해요.")
             df_detail = df_detail.copy()
-            df_detail["title"] = df_detail["promo"].map(lambda p: request_copy_map.get(p, {}).get("title", ""))
-            df_detail["content"] = df_detail["promo"].map(lambda p: request_copy_map.get(p, {}).get("content", ""))
+            if rc_key_cols:
+                if rc_key_cols == ["promo"]:
+                    st.caption("ℹ️ 요청문구 시트에 일자/시간대 컬럼이 없어서 기획전No.만으로 매칭했어요.")
+
+                def _rc_key(row, cols=rc_key_cols):
+                    vals = []
+                    for c in cols:
+                        if c == "hour":
+                            vals.append(_norm_hour_val(row["hour"]))
+                        elif c == "promo":
+                            vals.append(_norm_promo_val(row["promo"]))
+                        else:
+                            vals.append(_txt_val(row[c]))
+                    return tuple(vals)
+
+                rc_keys = df_detail.apply(_rc_key, axis=1)
+                df_detail["title"] = rc_keys.map(lambda k: request_copy_map.get(k, {}).get("title", ""))
+                df_detail["content"] = rc_keys.map(lambda k: request_copy_map.get(k, {}).get("content", ""))
+            else:
+                df_detail["title"] = ""
+                df_detail["content"] = ""
 
             detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo", "title", "content",
                           "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
