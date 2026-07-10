@@ -1420,14 +1420,17 @@ def main():
                 wk = cf.groupby(["week_start", "week_label"], dropna=False).agg(
                     send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
                 wk = wk.sort_values("week_start")
+                wk["ctr"] = np.where(wk["send"] > 0, wk["uv"] / wk["send"], 0.0)
+                wk["cvr"] = np.where(wk["uv"] > 0, wk["oc"] / wk["uv"], 0.0)
                 metric = st.selectbox("차트 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k],
                                       key="camp_week_metric")
                 fig = go.Figure(go.Bar(x=wk["week_label"], y=wk[metric], marker_color="#7b5bc0"))
                 fig.update_layout(**base_layout(title=f"주차별 {METRIC_LABELS[metric]}"))
                 st.plotly_chart(fig, use_container_width=True)
-                show_wk = wk.rename(columns={"week_label": "주차", **METRIC_LABELS})
-                st.dataframe(show_wk[["주차", "발송모수", "UV", "주문건수", "거래액"]].style.format({
+                show_wk = wk.rename(columns={"week_label": "주차", "ctr": "CTR", "cvr": "CR", **METRIC_LABELS})
+                st.dataframe(show_wk[["주차", "발송모수", "UV", "주문건수", "거래액", "CTR", "CR"]].style.format({
                     "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                    "CTR": "{:.2%}", "CR": "{:.2%}",
                 }), use_container_width=True, hide_index=True)
 
                 st.markdown("#### 일자별 상세")
