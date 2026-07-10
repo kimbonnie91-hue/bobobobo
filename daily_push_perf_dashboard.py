@@ -1008,12 +1008,15 @@ def main():
                   "cust": "고객수", "oc": "주문건수", "amt": "거래액", "infl_cr": "유입전환율",
                   "ord_cr": "주문전환율", "eff": "효율"}
 
+    PCT_NUM_COLS = {"infl_cr", "ord_cr"}
+
     def store_column_config(disabled=()):
         cfg = {}
         for k, label in TXT_LABELS.items():
             cfg[k] = st.column_config.TextColumn(label, disabled=(k in disabled))
         for k, label in NUM_LABELS.items():
-            cfg[k] = st.column_config.NumberColumn(label, disabled=(k in disabled))
+            fmt = "percent" if k in PCT_NUM_COLS else None
+            cfg[k] = st.column_config.NumberColumn(label, disabled=(k in disabled), format=fmt)
         return cfg
 
     # ── 저장소 백엔드: 구글시트(설정 시) ↔ 로컬 CSV(폴백) ──
