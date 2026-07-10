@@ -490,8 +490,7 @@ def _finalize(df):
     df["af"] = df["af"].astype(str).str.strip()
     df["date"] = df["date"].astype(str).str.replace(r"\.0$", "", regex=True)
     for c in NUM_COLS:
-        if c in df:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df[c] = pd.to_numeric(df[c], errors="coerce") if c in df else np.nan
     for c in TXT_COLS:
         if c in df:
             df[c] = df[c].apply(_txt_val)
@@ -1793,14 +1792,25 @@ def main():
         st.markdown("---")
         st.markdown("#### 전체 데이터 편집")
         st.caption("행을 수정·삭제하거나 새 행을 추가한 뒤 저장하면, 저장된 전체 데이터가 이 표 내용으로 바뀌어요 (필터와 무관).")
+        date_search = st.text_input("일자 검색 (예: 20260629 또는 202606)", "", key="data_editor_date_search")
+        full_df = df[STORE_COLS]
+        if date_search.strip():
+            mask = full_df["date"].astype(str).str.contains(re.escape(date_search.strip()), na=False)
+            editor_source, other_rows = full_df[mask], full_df[~mask]
+            st.caption(f"검색 결과 {len(editor_source):,}행 표시 중 (전체 {len(full_df):,}행 · 검색에 안 걸린 "
+                      f"{len(other_rows):,}행은 화면엔 안 보이지만 저장해도 그대로 남아있어요).")
+        else:
+            editor_source, other_rows = full_df, full_df.iloc[0:0]
         if "data_editor_ver" not in st.session_state:
             st.session_state.data_editor_ver = 0
-        edited_all = st.data_editor(df[STORE_COLS], num_rows="dynamic", use_container_width=True, height=460,
-                                    column_config=store_column_config(), key=f"data_editor_{st.session_state.data_editor_ver}")
+        edited_all = st.data_editor(editor_source, num_rows="dynamic", use_container_width=True, height=460,
+                                    column_config=store_column_config(),
+                                    key=f"data_editor_{st.session_state.data_editor_ver}_{hash(date_search.strip())}")
         if st.button("💾 변경사항 저장", use_container_width=True):
             clean = clean_manual_rows(edited_all)
-            storage_save(BK, clean)
-            st.success(f"{len(clean):,}건으로 저장했어요.")
+            merged = pd.concat([other_rows, clean], ignore_index=True) if date_search.strip() else clean
+            storage_save(BK, merged)
+            st.success(f"{len(merged):,}건으로 저장했어요.")
             st.session_state.data_editor_ver += 1
             st.rerun()
 
