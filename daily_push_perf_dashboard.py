@@ -1183,7 +1183,7 @@ def main():
         f = df.copy()
 
     pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
-             "AF코드별 리더보드", "✍️ 직접 입력", "데이터"]
+             "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
     if df.empty and page not in ("✍️ 직접 입력", "데이터"):
@@ -1559,38 +1559,6 @@ def main():
                      .style.format({"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}",
                                     "거래액": "{:,.0f}", "누적": "{:,.0f}", "WoW%": "{:+.1f}%"}),
                      use_container_width=True, hide_index=True)
-
-    # ══════════════════════════════════════════════════════════
-    # AF코드별 리더보드
-    # ══════════════════════════════════════════════════════════
-    elif page == "AF코드별 리더보드":
-        st.title("AF코드별 리더보드")
-        st.caption("AF코드는 매주 재사용되기 때문에 AF코드 하나만으로 묶으면 서로 다른 캠페인이 섞여요. "
-                  "그래서 **AF코드+브랜드(캠페인명)** 조합을 하나의 캠페인으로 보고 집계해요.")
-        g = f.groupby(["af", "brand"], dropna=False).agg(
-            BPU=("bpu", "first"), 발송유형=("stype", "first"),
-            발송횟수=("date", "nunique"), 최근일자=("date", "max"),
-            send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum"),
-        ).reset_index()
-        g["ctr"] = np.where(g["send"] > 0, g["uv"] / g["send"], 0.0)
-        g["cvr"] = np.where(g["uv"] > 0, g["oc"] / g["uv"], 0.0)
-        g["rps"] = np.where(g["send"] > 0, g["amt"] / g["send"], 0.0)
-        metric = st.selectbox("정렬 지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k], key="af_metric")
-        g = g.sort_values(metric, ascending=False)
-
-        top = g.head(20)
-        fig = go.Figure(go.Bar(x=top[metric], y=top["af"] + " · " + top["brand"], orientation="h", marker_color="#7b5bc0"))
-        fig.update_layout(**base_layout(h=max(320, 24 * len(top)), title=f"상위 20 · {METRIC_LABELS[metric]}"))
-        fig.update_yaxes(autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
-
-        show = g.rename(columns={"af": "AF코드", "brand": "브랜드", **METRIC_LABELS,
-                                 "ctr": "CTR(UV/발송)", "cvr": "주문전환율(주문/UV)", "rps": "RPS(발송당거래액)"})
-        st.dataframe(show[["AF코드", "브랜드", "BPU", "발송유형", "발송횟수", "최근일자", "발송모수", "UV",
-                          "주문건수", "거래액", "CTR(UV/발송)", "주문전환율(주문/UV)", "RPS(발송당거래액)"]].style.format({
-            "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
-            "CTR(UV/발송)": "{:.2%}", "주문전환율(주문/UV)": "{:.2%}", "RPS(발송당거래액)": "{:,.0f}",
-        }), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 직접 입력 — 엑셀 업로드 없이 표에서 바로 기록
