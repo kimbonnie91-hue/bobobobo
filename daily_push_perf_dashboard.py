@@ -85,7 +85,7 @@ def _norm_date(v):
     return None
 
 
-def _find_header_row(rows, candidates=None, max_scan=10, min_score=3):
+def _find_header_row(rows, candidates=None, max_scan=30, min_score=3):
     """rows 앞부분에서 candidates(기본 COLMAP_CANDIDATES)와 가장 많이 일치하는 행을 헤더로 판정."""
     norms = _ALL_CAND_NORMS if candidates is None else _cand_norms(candidates)
     best_i, best_score = None, min_score - 1
@@ -861,13 +861,15 @@ def gs_worksheet_by_gid(sh, gid):
 
 def load_plan_rows_from_gsheet(creds_dict, spreadsheet, gid):
     """발송 계획 시트에서 (필터 적용 전) 헤더 인식·컬럼 매핑까지 마친 원본 행을 읽어온다.
-    필터는 filter_complete_plan_rows에서 별도로 건다 (진단 메시지에서 필터 전/후를 구분해 보여주기 위함)."""
+    필터는 filter_complete_plan_rows에서 별도로 건다 (진단 메시지에서 필터 전/후를 구분해 보여주기 위함).
+    반환값: (파싱된 DataFrame, API가 실제로 돌려준 원본 행(rows) 리스트) — rows는 파싱이 완전히
+    비었을 때(헤더를 못 찾음/시트가 진짜 비어있음) 원인을 구분해 보여주는 진단용."""
     sh = gs_open(creds_dict, spreadsheet)
     ws = gs_worksheet_by_gid(sh, gid) if gid else sh.sheet1
     if ws is None:
         raise ValueError(f"gid={gid} 탭을 찾을 수 없어요. 시트 URL의 gid를 확인해주세요.")
     rows = ws.get_all_values()
-    return parse_material_rows(rows)
+    return parse_material_rows(rows), rows
 
 
 def plan_rows_blank_summary(df, required=PLAN_SHEET_REQUIRED):
@@ -1655,15 +1657,22 @@ def main():
                         st.error("구글시트 연동이 설정돼 있지 않아요 (Secrets에 gcp_service_account가 필요해요).")
                     else:
                         try:
-                            raw_rows = load_plan_rows_from_gsheet(
+                            raw_rows, sheet_rows = load_plan_rows_from_gsheet(
                                 st.secrets["gcp_service_account"], plan_url, plan_gid)
                         except Exception as e:
                             msg = str(e)[:150].strip() or type(e).__name__
                             st.error(f"구글시트에서 불러오기 실패: {msg}")
                         else:
                             if raw_rows.empty:
-                                st.warning("시트에서 읽은 행이 없어요. gid가 맞는지, 표 위쪽 10행 안에 "
-                                          "'일자'·'AF코드' 같은 헤더 행이 있는지 확인해주세요.")
+                                if not sheet_rows:
+                                    st.warning("이 탭 자체가 완전히 비어 있어요. gid가 맞는 탭을 가리키는지 "
+                                              "확인해주세요.")
+                                else:
+                                    st.warning(f"시트에서 총 {len(sheet_rows):,}행을 받았지만, 그 안에서 "
+                                              "'일자'·'AF코드' 같은 헤더 행을 찾지 못했어요 (위쪽 30행 안에서 찾아요). "
+                                              "아래 원본 미리보기에서 실제 헤더가 몇 번째 줄에 있는지 확인해주세요.")
+                                    with st.expander("읽어온 원본 미리보기 (최대 30행)"):
+                                        st.dataframe(pd.DataFrame(sheet_rows[:30]), use_container_width=True)
                             else:
                                 new_rows = filter_complete_plan_rows(raw_rows)
                                 if new_rows.empty:
