@@ -863,7 +863,7 @@ def load_plan_rows_from_gsheet(creds_dict, spreadsheet, gid):
     """발송 계획 시트에서 (필터 적용 전) 헤더 인식·컬럼 매핑까지 마친 원본 행을 읽어온다.
     필터는 filter_complete_plan_rows에서 별도로 건다 (진단 메시지에서 필터 전/후를 구분해 보여주기 위함)."""
     sh = gs_open(creds_dict, spreadsheet)
-    ws = gs_worksheet_by_gid(sh, gid)
+    ws = gs_worksheet_by_gid(sh, gid) if gid else sh.sheet1
     if ws is None:
         raise ValueError(f"gid={gid} 탭을 찾을 수 없어요. 시트 URL의 gid를 확인해주세요.")
     rows = ws.get_all_values()
@@ -1037,6 +1037,16 @@ def main():
             return st.session_state.get("request_copy_url") or PLAN_SHEET_URL, \
                    st.session_state.get("request_copy_gid"), True
         return PLAN_SHEET_URL, REQUEST_COPY_GID, False
+
+    def plan_sheet_source():
+        """발송 계획 시트도 요청문구 시트와 같은 방식으로 세션에서 직접 연결한 시트를 우선한다.
+        발송 계획은 스프레드시트 하나에 주차별로 탭이 나뉘어 있어(예: '7월 1주차(7/6~7/12)'),
+        기본 gid 하나만으로는 최신 주차를 못 읽어올 수 있어 사용자가 원하는 주차 탭 URL로 바꿀 수 있게 한다."""
+        is_custom = "plan_sheet_url" in st.session_state
+        if is_custom:
+            return st.session_state.get("plan_sheet_url") or PLAN_SHEET_URL, \
+                   st.session_state.get("plan_sheet_gid"), True
+        return PLAN_SHEET_URL, PLAN_SHEET_GID, False
 
     def load_request_copy_map():
         """'요청문구' 시트를 읽어 {기획전No.: {title, content}} 형태로 돌려준다.
@@ -1648,10 +1658,26 @@ def main():
                       "비워두면 '발송 건수' 표에서 자동 조회해요 — 값을 바꾸면 유입전환율/주문전환율/효율도 그에 맞게 다시 계산돼요. "
                       "행 추가는 표 맨 아래 + 를 누르면 돼요.")
 
-            with st.expander("☁️ 구글 발송 계획 시트에서 불러오기"):
+            plan_url, plan_gid, plan_is_custom = plan_sheet_source()
+            with st.expander("☁️ 구글 발송 계획 시트에서 불러오기", expanded=plan_is_custom):
                 st.caption("요일·시간대는 비어 있어도 불러오지만, 그 외 항목(타겟구분/발송유형/BPU/우선순위/"
                           "카테고리/속성/담당자/브랜드/AF코드/기획전No.) 중 하나라도 빈 칸인 행은 불러오지 않아요. "
                           "발송모수는 이후 자동 조회로 채워지는 값이라 확인하지 않아요.")
+                st.caption(("현재 **직접 연결한 시트**(주차 탭)를 쓰고 있어요." if plan_is_custom else
+                           "현재 **기본 시트**를 쓰고 있어요 — 발송 계획은 주차마다 탭이 나뉘어 있어서, "
+                           "원하는 주차의 탭 URL을 붙여넣으면 그 주차를 불러올 수 있어요.") +
+                          " (URL에 `#gid=...`가 있으면 그 탭을 읽어요.)")
+                plan_url_input = st.text_input("구글시트 URL", value=plan_url, key="plan_sheet_url_input")
+                pb1, pb2 = st.columns(2)
+                if pb1.button("🔗 연결", key="plan_sheet_connect", use_container_width=True):
+                    st.session_state.plan_sheet_url = plan_url_input.strip()
+                    st.session_state.plan_sheet_gid = _parse_sheet_url_gid(plan_url_input)
+                    st.rerun()
+                if pb2.button("↺ 기본 시트로 되돌리기", key="plan_sheet_reset", use_container_width=True,
+                             disabled=not plan_is_custom):
+                    st.session_state.pop("plan_sheet_url", None)
+                    st.session_state.pop("plan_sheet_gid", None)
+                    st.rerun()
                 if st.button("📥 불러오기", key="plan_sheet_import"):
                     try:
                         has_creds = "gcp_service_account" in st.secrets
@@ -1662,7 +1688,7 @@ def main():
                     else:
                         try:
                             raw_rows = load_plan_rows_from_gsheet(
-                                st.secrets["gcp_service_account"], PLAN_SHEET_URL, PLAN_SHEET_GID)
+                                st.secrets["gcp_service_account"], plan_url, plan_gid)
                         except Exception as e:
                             msg = str(e)[:150].strip() or type(e).__name__
                             st.error(f"구글시트에서 불러오기 실패: {msg}")
