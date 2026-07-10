@@ -85,7 +85,7 @@ def _norm_date(v):
     return None
 
 
-def _find_header_row(rows, candidates=None, max_scan=30, min_score=3):
+def _find_header_row(rows, candidates=None, max_scan=100, min_score=3):
     """rows 앞부분에서 candidates(기본 COLMAP_CANDIDATES)와 가장 많이 일치하는 행을 헤더로 판정."""
     norms = _ALL_CAND_NORMS if candidates is None else _cand_norms(candidates)
     best_i, best_score = None, min_score - 1
@@ -1669,10 +1669,10 @@ def main():
                                               "확인해주세요.")
                                 else:
                                     st.warning(f"시트에서 총 {len(sheet_rows):,}행을 받았지만, 그 안에서 "
-                                              "'일자'·'AF코드' 같은 헤더 행을 찾지 못했어요 (위쪽 30행 안에서 찾아요). "
+                                              "'일자'·'AF코드' 같은 헤더 행을 찾지 못했어요 (위쪽 100행 안에서 찾아요). "
                                               "아래 원본 미리보기에서 실제 헤더가 몇 번째 줄에 있는지 확인해주세요.")
-                                    with st.expander("읽어온 원본 미리보기 (최대 30행)"):
-                                        st.dataframe(pd.DataFrame(sheet_rows[:30]), use_container_width=True)
+                                    with st.expander("읽어온 원본 미리보기 (최대 100행)"):
+                                        st.dataframe(pd.DataFrame(sheet_rows[:100]), use_container_width=True)
                             else:
                                 new_rows = filter_complete_plan_rows(raw_rows)
                                 if new_rows.empty:
