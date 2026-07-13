@@ -1606,23 +1606,31 @@ def main():
         g = f.groupby(["week_start", "week_label"], dropna=False).agg(
             send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
         g = g.sort_values("week_start")
-        metric = st.selectbox("지표", list(METRIC_LABELS), format_func=lambda k: METRIC_LABELS[k], key="week_metric")
+        g["ctr"] = np.where(g["send"] > 0, g["uv"] / g["send"], 0.0)
+        g["cvr"] = np.where(g["uv"] > 0, g["oc"] / g["uv"], 0.0)
+        TREND_METRIC_LABELS = {**METRIC_LABELS, "ctr": "CTR(UV/발송)", "cvr": "CR(주문/UV)"}
+        metric = st.selectbox("지표", list(TREND_METRIC_LABELS), format_func=lambda k: TREND_METRIC_LABELS[k],
+                              key="week_metric")
+        is_pct = metric in ("ctr", "cvr")
         g["누적"] = g[metric].cumsum()
         g["WoW%"] = g[metric].pct_change() * 100
 
         fig = go.Figure()
-        fig.add_bar(x=g["week_label"], y=g[metric], name=f"주간 {METRIC_LABELS[metric]}", marker_color="#4f8fff")
+        fig.add_bar(x=g["week_label"], y=g[metric], name=f"주간 {TREND_METRIC_LABELS[metric]}", marker_color="#4f8fff")
         fig.add_trace(go.Scatter(x=g["week_label"], y=g["누적"], name="누적", yaxis="y2",
                                  mode="lines+markers", line=dict(color="#ed8936", width=2)))
-        layout = base_layout(title=f"주차별 {METRIC_LABELS[metric]} · 누적 추이")
+        layout = base_layout(title=f"주차별 {TREND_METRIC_LABELS[metric]} · 누적 추이")
         layout["yaxis2"] = dict(overlaying="y", side="right", showgrid=False)
+        if is_pct:
+            layout["yaxis"]["tickformat"] = ".1%"
         fig.update_layout(**layout)
         st.plotly_chart(fig, use_container_width=True)
 
-        show = g.rename(columns={"week_label": "주차", **METRIC_LABELS})
-        st.dataframe(show[["주차", "발송모수", "UV", "주문건수", "거래액", "누적", "WoW%"]]
+        show = g.rename(columns={"week_label": "주차", "ctr": "CTR", "cvr": "CR", **METRIC_LABELS})
+        st.dataframe(show[["주차", "발송모수", "UV", "주문건수", "거래액", "CTR", "CR", "누적", "WoW%"]]
                      .style.format({"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}",
-                                    "거래액": "{:,.0f}", "누적": "{:,.0f}", "WoW%": "{:+.1f}%"}),
+                                    "거래액": "{:,.0f}", "CTR": "{:.2%}", "CR": "{:.2%}",
+                                    "누적": ("{:.2%}" if is_pct else "{:,.0f}"), "WoW%": "{:+.1f}%"}),
                      use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
