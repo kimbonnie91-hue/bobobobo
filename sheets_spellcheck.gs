@@ -67,6 +67,8 @@ function onOpen() {
     .createMenu('🔁 AF코드 중복')
     .addItem('전체 검사(각 주차 탭 내부)', 'checkAllAfDuplicates')
     .addItem('AF 중복 표시 지우기(현재 시트)', 'clearAfMarksSheet')
+    .addSeparator()
+    .addItem('🔧 진단(왜 경고가 안 뜨나)', 'afDiag')
     .addToUi();
 }
 
@@ -588,11 +590,55 @@ function getMasterCodeSet(ss) {
 }
 
 
-/** 시트에서 'AF코드' 헤더가 있는 열 번호 찾기 (없으면 -1) */
+/** 시트에서 'AF코드' 헤더가 있는 열 번호 찾기 (없으면 -1). 앞뒤 공백 허용 */
 function findAfCol(sh) {
-  var finder = sh.createTextFinder(AFCODE_HEADER).matchEntireCell(true);
-  var found = finder.findNext();
-  return found ? found.getColumn() : -1;
+  var matches = sh.createTextFinder(AFCODE_HEADER).findAll();
+  for (var i = 0; i < matches.length; i++) {
+    if (String(matches[i].getValue()).trim() === AFCODE_HEADER) {
+      return matches[i].getColumn();
+    }
+  }
+  return matches.length ? matches[0].getColumn() : -1;
+}
+
+
+/** 진단: 현재 탭이 검사 대상인지, AF코드 열을 찾는지, 탭 내부 중복이 있는지 보고 */
+function afDiag() {
+  var sh = SpreadsheetApp.getActiveSheet();
+  var name = sh.getName();
+  var isWeekly = name.indexOf(WEEKLY_TAB_PATTERN) !== -1;
+  var col = findAfCol(sh);
+
+  var msg = '탭 이름: "' + name + '"\n'
+    + "· '" + WEEKLY_TAB_PATTERN + "' 포함(검사 대상): "
+    + (isWeekly ? '예 ✅' : '아니오 ❌  ← 이래서 경고가 안 뜹니다') + '\n'
+    + '· AF코드 열: '
+    + (col === -1 ? '못 찾음 ❌  ← 헤더가 정확히 "AF코드"인지 확인' : col + '열 (' + colLetter(col) + ') ✅') + '\n';
+
+  if (col !== -1) {
+    var idx = buildSheetIndex(sh);
+    var codeCount = Object.keys(idx).length;
+    var dups = [];
+    for (var c in idx) {
+      if (idx[c].length > 1) dups.push(c + ' (행 ' + idx[c].join(',') + ')');
+    }
+    msg += '· 인식된 코드 수: ' + codeCount + '\n'
+        + '· 이 탭 중복: ' + (dups.length ? dups.join(' / ') : '없음');
+  }
+
+  SpreadsheetApp.getUi().alert('AF코드 진단', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+/** 열 번호 → 문자(A,B,...) */
+function colLetter(col) {
+  var s = '';
+  while (col > 0) {
+    var m = (col - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    col = Math.floor((col - 1) / 26);
+  }
+  return s;
 }
 
 
