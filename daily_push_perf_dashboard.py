@@ -16,7 +16,7 @@
 데이터 로직(파싱/집계 함수)은 Streamlit 비의존 순수 함수이며 모듈 import 만으로 테스트 가능하다.
 앱 UI 는 main() 안에 있고 `python -m streamlit run daily_push_perf_dashboard.py` 시에만 실행된다.
 """
-import io, os, re, datetime
+import io, os, re, datetime, math
 import numpy as np
 import pandas as pd
 
@@ -1225,7 +1225,7 @@ def main():
         st.sidebar.caption("아직 데이터가 없어요. '✍️ 직접 입력'에서 바로 추가하거나 엑셀을 업로드해 보세요.")
         f = df.copy()
 
-    pages = ["종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
+    pages = ["주간보고", "종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
              "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
@@ -1251,9 +1251,182 @@ def main():
         return
 
     # ══════════════════════════════════════════════════════════
+    # 주간보고
+    # ══════════════════════════════════════════════════════════
+    if page == "주간보고":
+        st.title("주간보고")
+        st.caption("기준 주차(월~일) 실적을 전주·전월 동주·전년 동주와 비교하고, 월 누계(MTD)는 전월·전년 같은 "
+                  "기간과 비교해요. 모든 값은 합산(가중) 기준이에요. 사이드바 필터가 반영돼요.")
+
+        weeks_sorted = f[["week_start", "week_label"]].drop_duplicates().sort_values("week_start", ascending=False)
+        week_options = weeks_sorted["week_label"].tolist()
+        if not week_options:
+            st.info("표시할 주차 데이터가 없어요.")
+        else:
+            pick = st.selectbox("기준 주차", week_options, key="wr_week_pick",
+                                help=("**비교 기준**\n\n"
+                                      "- **전주**: 기준 주차 바로 앞 1주(월~일)\n"
+                                      "- **전월 동주**: 기준 주차 시작일(월요일)의 한 달 전 날짜가 속한 주(월~일)\n"
+                                      "- **전년 동주**: 기준 주차와 요일이 맞도록 364일(52주) 전 같은 주\n"
+                                      "- 해당 기간에 데이터가 없으면 '-'로 표시돼요\n"
+                                      "- **✱**: CTR·주문CR의 증감이 통계적으로 유의미함(이표본 비율 z검정, p<0.05)"))
+            cur_start = weeks_sorted.loc[weeks_sorted["week_label"] == pick, "week_start"].iloc[0]
+            cur_end = cur_start + pd.Timedelta(days=6)
+
+            def _period_bounds(base_start, weeks_back=None, months_back=None):
+                base_ts = pd.Timestamp(base_start)
+                if weeks_back is not None:
+                    s = (base_ts - pd.Timedelta(days=7 * weeks_back)).date()
+                else:
+                    d = base_ts - pd.DateOffset(months=months_back)
+                    s = (d - pd.Timedelta(days=d.weekday())).date()
+                return s, s + pd.Timedelta(days=6)
+
+            prev_start, prev_end = _period_bounds(cur_start, weeks_back=1)
+            pmonth_start, pmonth_end = _period_bounds(cur_start, months_back=1)
+            pyear_start, pyear_end = _period_bounds(cur_start, weeks_back=52)
+
+            def _agg(s, e):
+                sub = f[(f["dt"].dt.date >= s) & (f["dt"].dt.date <= e)]
+                if sub.empty:
+                    return None
+                send, uv, oc, amt = sub["send"].sum(), sub["uv"].sum(), sub["oc"].sum(), sub["amt"].sum()
+                return {
+                    "n_camp": sub[["af", "brand"]].drop_duplicates().shape[0],
+                    "send": send, "uv": uv, "oc": oc, "amt": amt,
+                    "ctr": (uv / send if send else 0.0), "cr": (oc / uv if uv else 0.0),
+                    "rps": (amt / send if send else 0.0), "aov": (amt / oc if oc else 0.0),
+                }
+
+            cur = _agg(cur_start, cur_end)
+            prev = _agg(prev_start, prev_end)
+            pmonth = _agg(pmonth_start, pmonth_end)
+            pyear = _agg(pyear_start, pyear_end)
+
+            def _ztest_pvalue(x1, n1, x2, n2):
+                if not n1 or not n2:
+                    return None
+                p1, p2 = x1 / n1, x2 / n2
+                p_pool = (x1 + x2) / (n1 + n2)
+                var = p_pool * (1 - p_pool) * (1 / n1 + 1 / n2)
+                if var <= 0:
+                    return None
+                z = (p1 - p2) / (var ** 0.5)
+                return 2 * (1 - 0.5 * (1 + math.erf(abs(z) / (2 ** 0.5))))
+
+            def _sig(a, b, num_key, den_key):
+                if not a or not b:
+                    return False
+                p = _ztest_pvalue(a[num_key], a[den_key], b[num_key], b[den_key])
+                return p is not None and p < 0.05
+
+            def _delta_pct_txt(cur_v, prior_v):
+                if cur_v is None or not prior_v:
+                    return ":gray[–]"
+                pct = (cur_v - prior_v) / prior_v * 100
+                color = "red" if pct > 0 else ("blue" if pct < 0 else "gray")
+                arrow = "▲" if pct > 0 else ("▽" if pct < 0 else "-")
+                return f":{color}[{arrow}{abs(pct):.1f}%]"
+
+            def _delta_pp_txt(cur_v, prior_v, sig=False):
+                if cur_v is None or prior_v is None:
+                    return ":gray[–]"
+                pp = (cur_v - prior_v) * 100
+                color = "red" if pp > 0 else ("blue" if pp < 0 else "gray")
+                sign = "+" if pp >= 0 else ""
+                mark = " ✱" if sig else ""
+                return f":{color}[{sign}{pp:.2f}%p{mark}]"
+
+            cards = [
+                ("발송", (f"{cur['send']:,.0f}" if cur else "-"), "send", False),
+                ("UV", (f"{cur['uv']:,.0f}" if cur else "-"), "uv", False),
+                ("CTR", (f"{cur['ctr']:.2%}" if cur else "-"), "ctr", True),
+                ("주문CR", (f"{cur['cr']:.2%}" if cur else "-"), "cr", True),
+                ("거래액", (won(cur['amt']) if cur else "-"), "amt", False),
+                ("RPS", (f"{cur['rps']:,.0f}" if cur else "-"), "rps", False),
+            ]
+            cols = st.columns(len(cards))
+            for col, (label, val_str, key, is_pp) in zip(cols, cards):
+                col.markdown(f"<div style='color:#64748b;font-size:12px'>{label}</div>", unsafe_allow_html=True)
+                col.markdown(f"<div style='font-size:26px;font-weight:700;color:#1e293b'>{val_str}</div>",
+                            unsafe_allow_html=True)
+                if cur and is_pp:
+                    sig_prev = _sig(cur, prev, "uv" if key == "ctr" else "oc", "send" if key == "ctr" else "uv")
+                    sig_year = _sig(cur, pyear, "uv" if key == "ctr" else "oc", "send" if key == "ctr" else "uv")
+                    col.caption(_delta_pp_txt(cur[key], prev[key] if prev else None, sig_prev) + " 전주 대비")
+                    col.caption(_delta_pp_txt(cur[key], pyear[key] if pyear else None, sig_year) + " 전년 대비")
+                elif cur:
+                    col.caption(_delta_pct_txt(cur[key], prev[key] if prev else None) + " 전주 대비")
+                    col.caption(_delta_pct_txt(cur[key], pyear[key] if pyear else None) + " 전년 대비")
+
+            st.markdown("#### 📋 주요 지표 현황")
+            ROW_SPECS = [
+                ("n_camp", "캠페인수", False, lambda v: f"{v:,.0f}"),
+                ("send", "발송", False, lambda v: f"{v:,.0f}"),
+                ("uv", "UV", False, lambda v: f"{v:,.0f}"),
+                ("oc", "주문건수", False, lambda v: f"{v:,.0f}"),
+                ("amt", "거래액", False, won),
+                ("ctr", "CTR", True, lambda v: f"{v:.2%}"),
+                ("cr", "주문CR", True, lambda v: f"{v:.2%}"),
+                ("rps", "RPS", False, lambda v: f"{v:,.0f}"),
+                ("aov", "객단가", False, won),
+            ]
+
+            def _cell(v, fmt):
+                return fmt(v) if v is not None else "-"
+
+            rows_html = []
+            for key, label, is_pp, fmt in ROW_SPECS:
+                cur_v = cur[key] if cur else None
+                prev_v = prev[key] if prev else None
+                pmonth_v = pmonth[key] if pmonth else None
+                pyear_v = pyear[key] if pyear else None
+                if is_pp:
+                    sig_prev = _sig(cur, prev, "uv" if key == "ctr" else "oc", "send" if key == "ctr" else "uv")
+                    sig_pmonth = _sig(cur, pmonth, "uv" if key == "ctr" else "oc", "send" if key == "ctr" else "uv")
+                    sig_pyear = _sig(cur, pyear, "uv" if key == "ctr" else "oc", "send" if key == "ctr" else "uv")
+                    d_prev = _delta_pp_txt(cur_v, prev_v, sig_prev)
+                    d_pmonth = _delta_pp_txt(cur_v, pmonth_v, sig_pmonth)
+                    d_pyear = _delta_pp_txt(cur_v, pyear_v, sig_pyear)
+                else:
+                    d_prev = _delta_pct_txt(cur_v, prev_v)
+                    d_pmonth = _delta_pct_txt(cur_v, pmonth_v)
+                    d_pyear = _delta_pct_txt(cur_v, pyear_v)
+                rows_html.append({
+                    "지표": label, "전주": _cell(prev_v, fmt), "기준주": _cell(cur_v, fmt), "전주비": d_prev,
+                    "전월 동주": _cell(pmonth_v, fmt), "전월비": d_pmonth,
+                    "전년 동주": _cell(pyear_v, fmt), "전년비": d_pyear,
+                })
+            report_df = pd.DataFrame(rows_html)
+
+            def _md_color(s):
+                m = re.match(r":(\w+)\[(.*)\]", s)
+                return f"<span style='color:{m.group(1)}'>{m.group(2)}</span>" if m else s
+
+            html_cols = ["지표", "전주", "기준주", "전주비", "전월 동주", "전월비", "전년 동주", "전년비"]
+            thead = "".join(
+                f"<th style='padding:6px 12px;text-align:{'left' if c == '지표' else 'right'};"
+                f"border-bottom:2px solid #e2e8f0'>{c}</th>" for c in html_cols)
+            trs = []
+            for _, r in report_df.iterrows():
+                tds = []
+                for c in html_cols:
+                    align = "left" if c == "지표" else "right"
+                    val = _md_color(r[c]) if c in ("전주비", "전월비", "전년비") else r[c]
+                    tds.append(f"<td style='padding:6px 12px;text-align:{align};border-bottom:1px solid #f1f5f9'>{val}</td>")
+                trs.append(f"<tr>{''.join(tds)}</tr>")
+            table_html = (f"<table style='width:100%;border-collapse:collapse;font-size:14px'>"
+                          f"<thead><tr>{thead}</tr></thead><tbody>{''.join(trs)}</tbody></table>")
+            st.markdown(table_html, unsafe_allow_html=True)
+
+            st.caption((f"기준주 {cur_start.strftime('%Y')}년 {pick} · 전년 동주 {pyear_start}~{pyear_end} — "
+                       "해당 기간에 데이터가 없으면 '-'로 표시돼요. 전월비는 기준주 시작일의 한 달 전 날짜가 속한 "
+                       "주(전월 동주)와 비교해요. ✱ = CTR·주문CR의 증감이 통계적으로 유의(p<0.05).").replace("~", "\\~"))
+
+    # ══════════════════════════════════════════════════════════
     # 종합요약
     # ══════════════════════════════════════════════════════════
-    if page == "종합요약":
+    elif page == "종합요약":
         st.title("종합 요약")
         tot = agg_metrics(f, ["stype"]).drop(columns=["stype"]).sum(numeric_only=True) if not f.empty else None
         send_t = f["send"].sum(); uv_t = f["uv"].sum(); oc_t = f["oc"].sum(); amt_t = f["amt"].sum()
