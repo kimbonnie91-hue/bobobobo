@@ -1,0 +1,628 @@
+<title>LF몰 CRM 자동화 메시지 성과 대시보드</title>
+<style>
+:root{
+  color-scheme: light;
+  --paper:#f4f2ee; --card:#fbfaf7; --card-2:#f0ede6;
+  --ink:#17171b; --ink-2:#57544d; --muted:#8b877d;
+  --line:#e2ded5; --line-2:#eae7df;
+  --gold:#9c6f28; --gold-soft:#b98f3f;
+  --good:#0a8a2f;
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; --s5:#4a3aa7; --s6:#e34948; --s7:#e87ba4; --s8:#eb6834;
+  --surface-1:#fbfaf7;
+  --shadow:0 1px 2px rgba(24,22,18,.04),0 8px 24px -12px rgba(24,22,18,.10);
+  --maxw:1060px;
+}
+:root{ --line:#e2ded5; }
+@media (prefers-color-scheme: dark){
+ :root:where(:not([data-theme="light"])){
+  color-scheme: dark;
+  --paper:#131318; --card:#1c1c22; --card-2:#232329;
+  --ink:#f2f0ea; --ink-2:#b7b2a7; --muted:#7f7b71;
+  --line:#2b2b32; --line-2:#26262c;
+  --gold:#d0a24e; --gold-soft:#b98f3f;
+  --good:#3fb25f;
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#2ba22b; --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
+  --surface-1:#1c1c22;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+ }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#131318; --card:#1c1c22; --card-2:#232329;
+  --ink:#f2f0ea; --ink-2:#b7b2a7; --muted:#7f7b71;
+  --line:#2b2b32; --line-2:#26262c;
+  --gold:#d0a24e; --gold-soft:#b98f3f;
+  --good:#3fb25f;
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#2ba22b; --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
+  --surface-1:#1c1c22;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Pretendard","Pretendard Variable","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-feature-settings:"tnum" 1; line-height:1.6; letter-spacing:-.01em;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 28px}
+.tnum{font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--gold); font-weight:700}
+h1,h2,h3{text-wrap:balance; margin:0}
+
+/* ---------- Masthead ---------- */
+.mast{padding:64px 0 30px; border-bottom:1px solid var(--line)}
+.mast .eyebrow{margin-bottom:18px}
+.mast h1{font-size:clamp(30px,5.2vw,50px); font-weight:800; line-height:1.08; letter-spacing:-.03em}
+.mast .sub{margin-top:16px; color:var(--ink-2); font-size:15.5px; max-width:60ch}
+.mast .meta{display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:22px; font-size:13px; color:var(--muted)}
+.mast .meta b{color:var(--ink-2); font-weight:600}
+.hero{display:grid; grid-template-columns:1.15fr .85fr; gap:30px; align-items:end; margin-top:40px}
+@media (max-width:720px){.hero{grid-template-columns:1fr; gap:22px}}
+.hero-num{font-size:clamp(52px,11vw,104px); font-weight:800; line-height:.92; letter-spacing:-.045em}
+.hero-num .u{font-size:.42em; font-weight:700; color:var(--gold); margin-left:.12em; letter-spacing:-.02em}
+.hero-cap{font-size:14px; color:var(--ink-2); margin-top:10px}
+.hero-cap .tag{color:var(--gold); font-weight:700}
+.hero-side{display:flex; flex-direction:column; gap:14px; padding-bottom:8px}
+.hero-side .row{display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding-bottom:12px; border-bottom:1px solid var(--line-2)}
+.hero-side .row:last-child{border-bottom:0}
+.hero-side .k{font-size:13px; color:var(--ink-2)}
+.hero-side .v{font-size:22px; font-weight:700; letter-spacing:-.02em}
+.hero-side .v small{font-size:12px; color:var(--muted); font-weight:600; margin-left:3px}
+
+/* ---------- KPI band ---------- */
+.kpis{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin:34px 0 8px}
+@media (max-width:860px){.kpis{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:480px){.kpis{grid-template-columns:1fr}}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 18px 16px; box-shadow:var(--shadow)}
+.kpi .kl{font-size:12px; color:var(--muted); font-weight:600; letter-spacing:-.005em}
+.kpi .kv{font-size:29px; font-weight:800; letter-spacing:-.03em; margin-top:8px; line-height:1}
+.kpi .kv .u{font-size:.5em; font-weight:700; color:var(--ink-2); margin-left:.08em}
+.kpi .kd{font-size:11.5px; color:var(--muted); margin-top:7px}
+.kpi.accent .kv{color:var(--gold)}
+
+/* ---------- Chapters ---------- */
+.chapter{padding:56px 0; border-bottom:1px solid var(--line)}
+.chapter:last-of-type{border-bottom:0}
+.ch-head{display:flex; gap:18px; align-items:flex-start; margin-bottom:26px}
+.ch-no{font-size:13px; font-weight:800; color:var(--gold); letter-spacing:.1em; padding-top:6px; min-width:34px}
+.ch-head h2{font-size:clamp(21px,3.4vw,28px); font-weight:800; letter-spacing:-.025em; line-height:1.15}
+.ch-head .stage{font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:7px}
+.ch-lead{color:var(--ink-2); font-size:15px; max-width:66ch; margin-top:10px}
+
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:24px}
+.grid-3-2{display:grid; grid-template-columns:1.35fr 1fr; gap:16px; margin-top:24px}
+@media (max-width:800px){.grid2,.grid-3-2{grid-template-columns:1fr}}
+
+.panel{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px 20px 18px; box-shadow:var(--shadow)}
+.panel h3{font-size:15px; font-weight:700; letter-spacing:-.01em}
+.panel .ph-sub{font-size:12.5px; color:var(--muted); margin-top:3px; margin-bottom:6px}
+.panel.full{grid-column:1/-1}
+
+/* mini stat cluster */
+.statrow{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+@media (max-width:480px){.statrow{grid-template-columns:1fr 1fr}}
+.stat .sl{font-size:11.5px; color:var(--muted); font-weight:600}
+.stat .sv{font-size:26px; font-weight:800; letter-spacing:-.03em; margin-top:5px; line-height:1}
+.stat .sv .u{font-size:.5em; color:var(--ink-2); font-weight:700; margin-left:.06em}
+.stat .sd{font-size:11px; color:var(--muted); margin-top:5px}
+.stat .sv.good{color:var(--good)}
+.stat .sv.gold{color:var(--gold)}
+
+/* efficiency bar */
+.effbar{margin-top:6px}
+.effbar .track{height:34px; border-radius:8px; background:var(--card-2); display:flex; overflow:hidden; border:1px solid var(--line)}
+.effbar .seg-cost{background:var(--s6); min-width:2px}
+.effbar .seg-rev{background:var(--s2)}
+.effbar .lab{display:flex; justify-content:space-between; font-size:12px; margin-top:9px; color:var(--ink-2)}
+.effbar .lab .dot{display:inline-block; width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+/* chart */
+.chart svg{width:100%; height:auto; display:block; overflow:visible}
+.axis text{fill:var(--muted); font-size:10.5px; font-variant-numeric:tabular-nums}
+.grid line{stroke:var(--line-2); stroke-width:1}
+.blab{fill:var(--ink); font-size:11px; font-weight:700; font-variant-numeric:tabular-nums}
+.blab-2{fill:var(--muted); font-size:10px; font-variant-numeric:tabular-nums}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:12px; font-size:12px; color:var(--ink-2)}
+.legend .li{display:flex; align-items:center; gap:7px}
+.legend .sw{width:11px;height:11px;border-radius:3px; flex-shrink:0}
+
+/* table */
+table{width:100%; border-collapse:collapse; font-size:13px}
+.tbl-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+th,td{text-align:right; padding:9px 10px; border-bottom:1px solid var(--line-2); white-space:nowrap}
+th{font-size:11px; color:var(--muted); font-weight:700; letter-spacing:.02em; text-transform:uppercase}
+td.l,th.l{text-align:left}
+tbody tr:hover{background:var(--card-2)}
+td .pill{display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--card-2); color:var(--ink-2)}
+td.num{font-variant-numeric:tabular-nums; font-weight:600}
+.roas-good{color:var(--good); font-weight:700}
+
+/* insight */
+.insights{display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:24px}
+@media (max-width:720px){.insights{grid-template-columns:1fr}}
+.ins{background:var(--card); border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:12px; padding:18px 20px; box-shadow:var(--shadow)}
+.ins h4{margin:0 0 6px; font-size:15px; font-weight:800; letter-spacing:-.02em}
+.ins p{margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.55}
+.ins .big{color:var(--gold); font-weight:800}
+
+footer{padding:40px 0 70px; color:var(--muted); font-size:12px; line-height:1.7}
+footer .fnote{max-width:80ch}
+footer b{color:var(--ink-2); font-weight:600}
+
+/* tooltip */
+#tt{position:fixed; pointer-events:none; z-index:50; background:var(--ink); color:var(--paper);
+  padding:8px 11px; border-radius:8px; font-size:12px; line-height:1.5; opacity:0; transform:translateY(4px);
+  transition:opacity .1s; box-shadow:0 8px 24px -8px rgba(0,0,0,.5); max-width:240px}
+#tt .tt-t{font-weight:700; margin-bottom:2px}
+#tt b{color:var(--gold-soft)}
+:root[data-theme="dark"] #tt, :root:where(:not([data-theme="light"])) #tt{background:#000}
+.hoverable{cursor:default; transition:opacity .12s}
+.dim{opacity:.28}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="tt"></div>
+<div class="wrap">
+
+  <!-- MASTHEAD -->
+  <header class="mast">
+    <div class="eyebrow">CRM Lifecycle Messaging · Performance Portfolio</div>
+    <h1>데이터로 설계한<br>고객 여정별 자동화 메시지 성과</h1>
+    <p class="sub">LF몰 RED CRM에서 운영한 SMS·LMS 라이프사이클 캠페인 — 첫 구매 재유입, 정기 리텐션, 라이브커머스 실시간 대응까지. 발송 시점·고객 세그먼트·혜택을 정교하게 설계해 <b>측정 가능한 매출</b>로 연결한 결과입니다.</p>
+    <div class="meta">
+      <span><b>운영 담당</b> · CRM 마케팅</span>
+      <span><b>채널</b> · SMS / LMS (RED CRM)</span>
+      <span><b>기간</b> · 2024.04 – 2026.05</span>
+      <span><b>분석 프로그램</b> · 4개 라이프사이클 캠페인</span>
+    </div>
+
+    <div class="hero">
+      <div>
+        <div class="hero-num tnum"><span id="h-rev"></span><span class="u">억원</span></div>
+        <div class="hero-cap">4개 자동화 캠페인 프로그램이 만든 <span class="tag">누적 기여 매출</span> · 25개월</div>
+      </div>
+      <div class="hero-side">
+        <div class="row"><span class="k">운영 캠페인 발송</span><span class="v tnum"><span id="h-sends"></span><small>건</small></span></div>
+        <div class="row"><span class="k">누적 주문 전환</span><span class="v tnum"><span id="h-orders"></span><small>건</small></span></div>
+        <div class="row"><span class="k">정기 리텐션 ROAS</span><span class="v tnum" style="color:var(--good)"><span id="h-roas"></span><small>x</small></span></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- KPI BAND -->
+  <section class="kpis" id="kpis"></section>
+  <p style="font-size:12px;color:var(--muted);margin:12px 2px 0">* ROAS = 발생 매출 ÷ 투입 비용(쿠폰할인·문자비). 각 프로그램은 서로 다른 고객군·목적의 독립 캠페인으로 중복 집계되지 않았습니다.</p>
+
+  <!-- CHAPTER 1 : 주문서 이탈 -->
+  <section class="chapter">
+    <div class="ch-head">
+      <div class="ch-no">01</div>
+      <div>
+        <div class="stage">첫 구매 전환 · 결제 이탈 재유입</div>
+        <h2>결제 직전 이탈 고객, 자동 쿠폰 문자로 되돌리다 <span style="color:var(--muted);font-weight:600">EV12</span></h2>
+        <p class="ch-lead">주문서까지 도달했지만 결제하지 않고 이탈한 고객에게, 이탈 시점을 트리거로 할인 쿠폰 문자를 자동 발송. <b>가장 구매 의도가 높은 순간</b>을 공략해 최소 비용으로 매출을 회수하는 프로그램입니다.</p>
+      </div>
+    </div>
+
+    <div class="grid-3-2">
+      <div class="panel">
+        <h3>비용 대비 매출 효율</h3>
+        <div class="ph-sub">쿠폰할인 + 문자비 투입 → 발생 매출</div>
+        <div class="effbar" id="eff-abandon"></div>
+        <div class="statrow" style="margin-top:22px">
+          <div class="stat"><div class="sl">발생 매출</div><div class="sv tnum" id="ab-rev"></div><div class="sd">39회 발송 누적</div></div>
+          <div class="stat"><div class="sl">순 기여 (매출−비용)</div><div class="sv good tnum" id="ab-net"></div><div class="sd">투입 대비 33배</div></div>
+          <div class="stat"><div class="sl">평균 ROAS</div><div class="sv gold tnum" id="ab-roas"></div><div class="sd">전 캠페인 최고 효율군</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>회당 발생 매출</h3>
+        <div class="ph-sub">발송 회차별 거래액 (백만원)</div>
+        <div class="chart" id="ch-abandon-bars"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAPTER 2 : 장바구니 보유 -->
+  <section class="chapter">
+    <div class="ch-head">
+      <div class="ch-no">02</div>
+      <div>
+        <div class="stage">첫 구매 전환 · 장바구니 리마인드</div>
+        <h2>장바구니에 담아둔 그 상품, 다시 떠올리게 하다 <span style="color:var(--muted);font-weight:600">EV14</span></h2>
+        <p class="ch-lead">6개월 미구매 고객 중 장바구니 보유 고객에게 월 1회 리마인드 SMS를 발송. 별도 혜택 없이 <b>상기(reminder)만으로</b> 20개월간 꾸준히 재구매를 이끌어낸, 저비용 상시 운영 캠페인입니다.</p>
+      </div>
+    </div>
+
+    <div class="grid-3-2">
+      <div class="panel full">
+        <h3>클릭률(CTR)·전환율(CR)·ROAS 추이</h3>
+        <div class="ph-sub">2024.08 – 2026.05 · 발송 회차별</div>
+        <div class="chart" id="ch-cart-lines"></div>
+        <div class="legend" id="cart-legend"></div>
+      </div>
+    </div>
+    <div class="statrow" style="margin-top:16px">
+      <div class="panel"><div class="stat"><div class="sl">평균 클릭률 (CTR)</div><div class="sv tnum" id="cart-ctr"></div><div class="sd">리마인드 단독 발송</div></div></div>
+      <div class="panel"><div class="stat"><div class="sl">누적 재구매 전환</div><div class="sv tnum" id="cart-ord"></div><div class="sd">20회 발송 누적</div></div></div>
+      <div class="panel"><div class="stat"><div class="sl">직접채널 ROAS (최근)</div><div class="sv good tnum">282<span class="u">x</span></div><div class="sd">2026.05 · 당일 직접유입 기준</div></div></div>
+    </div>
+  </section>
+
+  <!-- CHAPTER 3 : 정기 리텐션 -->
+  <section class="chapter">
+    <div class="ch-head">
+      <div class="ch-no">03</div>
+      <div>
+        <div class="stage">정기 리텐션 · 세그먼트 쿠폰 프로그램</div>
+        <h2>구매 이력별로 혜택을 나눠, 리텐션을 매출 엔진으로 <span style="color:var(--muted);font-weight:600">EV01–03</span></h2>
+        <p class="ch-lead">6개월 내 <b>미구매·단건구매·다건구매</b> 고객을 세그먼트로 나누고, 각 그룹에 6~8% 차등 쿠폰을 매월 지급. 25개월 누적 <b id="ret-headline"></b>억원의 매출을 만들어낸 핵심 리텐션 프로그램입니다.</p>
+      </div>
+    </div>
+
+    <div class="panel full">
+      <h3>월별 리텐션 매출 & 효율(ROAS) 추이</h3>
+      <div class="ph-sub">2024.04 – 2026.04 · 상단 매출(막대), 하단 ROAS(선) — 세그먼트 타겟팅 정교화 이후 효율이 구조적으로 상승</div>
+      <div class="chart" id="ch-ret-month"></div>
+    </div>
+
+    <div class="grid-3-2" style="margin-top:16px">
+      <div class="panel">
+        <h3>세그먼트별 기여 매출</h3>
+        <div class="ph-sub">누적 거래액 (억원)</div>
+        <div class="chart" id="ch-ret-seg"></div>
+      </div>
+      <div class="panel">
+        <h3>세그먼트별 효율 · 요약</h3>
+        <div class="ph-sub">고객 정의 · ROAS · 발송 횟수</div>
+        <div class="tbl-scroll"><table id="tbl-seg"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAPTER 4 : 영업 캠페인 -->
+  <section class="chapter">
+    <div class="ch-head">
+      <div class="ch-no">04</div>
+      <div>
+        <div class="stage">영업 캠페인 · 라이브커머스 실시간 대응</div>
+        <h2>라이브 방송에 맞춰, 실시간으로 문자를 쏘다 <span style="color:var(--muted);font-weight:600">2026 Q1–Q2</span></h2>
+        <p class="ch-lead">라이브 방송 본방·재방, 브랜드 기획전 등에 맞춰 3개월간 <b id="cp-n"></b>건의 캠페인을 실시간 운영. 캠페인 유형별 효율을 비교·분석해 <b>재방송 알림이 가장 높은 ROAS</b>를 낸다는 인사이트를 확인했습니다.</p>
+      </div>
+    </div>
+
+    <div class="grid-3-2">
+      <div class="panel">
+        <h3>캠페인 유형별 매출 & 효율</h3>
+        <div class="ph-sub">막대=매출(백만원) · 우측 라벨=평균 ROAS</div>
+        <div class="chart" id="ch-cp-type"></div>
+      </div>
+      <div class="panel">
+        <h3>클릭률 × 효율 분포</h3>
+        <div class="ph-sub">캠페인별 CTR(가로) vs ROAS(세로) · 크기=매출</div>
+        <div class="chart" id="ch-cp-scatter"></div>
+        <div class="legend" id="cp-legend"></div>
+      </div>
+    </div>
+
+    <div class="panel full" style="margin-top:16px">
+      <h3>매출 상위 캠페인 Top 8</h3>
+      <div class="ph-sub">2026.03 – 2026.05 발송분 기준</div>
+      <div class="tbl-scroll"><table id="tbl-top"></table></div>
+    </div>
+  </section>
+
+  <!-- INSIGHTS -->
+  <section class="chapter" style="border-bottom:0">
+    <div class="ch-head">
+      <div class="ch-no">✦</div>
+      <div>
+        <div class="stage">Key Takeaways</div>
+        <h2>이 데이터가 증명하는 것</h2>
+      </div>
+    </div>
+    <div class="insights">
+      <div class="ins"><h4>세그먼트 타겟팅으로 리텐션 효율 3배 개선</h4><p>구매 이력 기반 세그먼트 분리와 차등 쿠폰 설계 이후, 월 ROAS가 초기 <b>16x → <span class="big">70x+</span></b> 수준으로 구조적 상승. 같은 예산으로 더 많은 매출을 만드는 구조를 설계했습니다.</p></div>
+      <div class="ins"><h4>이탈 시점 자동화 = 최저 비용, 최고 효율</h4><p>결제 이탈 순간을 트리거로 한 재유입은 쿠폰·문자비 <b>0.8억 투입 → 27.2억 회수</b>. 구매 의도가 가장 높은 타이밍을 공략해 순기여 <span class="big">26.4억원</span>을 확보했습니다.</p></div>
+      <div class="ins"><h4>혜택 없이도 되는 '상기'의 힘</h4><p>장바구니 리마인드는 별도 쿠폰 없이 SMS 단독으로 20개월간 안정적 재구매를 유도. 채널·시점 설계만으로도 전환이 가능함을 <b>상시 캠페인으로 검증</b>했습니다.</p></div>
+      <div class="ins"><h4>데이터 기반 실시간 의사결정</h4><p>라이브커머스 71건을 유형별로 분석해 <b>재방송 알림 ROAS 62x</b>가 최고 효율임을 규명. 성과 데이터를 다음 캠페인의 편성·타겟 결정에 환류시켰습니다.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="fnote"><b>데이터 · 방법론.</b> 본 대시보드는 LF몰 RED CRM 자동화 메시지 실적 원본(첫구매_주문서이탈 EV12, 첫구매_장바구니보유 EV14, 정기리텐션 쿠폰 프로그램 EV01–03, 2026 발송캠페인 성과)을 집계·시각화한 포트폴리오입니다. 매출은 각 캠페인의 발생 거래액, ROAS는 발생 매출÷투입 비용(쿠폰할인·문자비) 기준. 4개 프로그램은 고객군·목적이 상이한 독립 캠페인으로 매출이 중복 집계되지 않았습니다. 일부 원본의 중복·결측 행은 집계에서 제외했습니다.</p>
+  </footer>
+</div>
+
+<script>
+const D = {"retention": {"total_rev": 11362643500.0727, "total_disc": 252005755.4182, "total_orders": 25926, "roas": 45.0888, "n": 94, "months": 25, "period": ["2024-04", "2026-04"], "monthly": [{"ym": "2024-04", "rev": 257181618.0, "disc": 15232864.181818184, "orders": 472.0, "roas": 16.8833395302618}, {"ym": "2024-05", "rev": 115838372.0909091, "disc": 6865009.818181818, "orders": 234.0, "roas": 16.87373727916803}, {"ym": "2024-06", "rev": 115838372.0909091, "disc": 6865009.818181818, "orders": 234.0, "roas": 16.87373727916803}, {"ym": "2024-07", "rev": 211609318.0, "disc": 12516745.0, "orders": 549.0, "roas": 16.90609803107757}, {"ym": "2024-08", "rev": 213365531.0, "disc": 13338036.0, "orders": 852.0, "roas": 15.996772763246403}, {"ym": "2024-09", "rev": 391024964.0, "disc": 26972891.0, "orders": 1270.0, "roas": 14.496961560405223}, {"ym": "2024-10", "rev": 526150178.0, "disc": 24597091.0, "orders": 1190.0, "roas": 21.390748117328183}, {"ym": "2024-11", "rev": 486863329.79999995, "disc": 6976993.6, "orders": 937.0, "roas": 69.78124930485818}, {"ym": "2024-12", "rev": 581735909.0, "disc": 7829054.0, "orders": 1145.0, "roas": 74.30475112318807}, {"ym": "2025-01", "rev": 486687782.0, "disc": 7355191.0, "orders": 1076.0, "roas": 66.16929213666918}, {"ym": "2025-02", "rev": 640538600.0, "disc": 9891382.0, "orders": 1442.0, "roas": 64.75724019151217}, {"ym": "2025-03", "rev": 542589509.0, "disc": 9143073.0, "orders": 1348.0, "roas": 59.34432646441738}, {"ym": "2025-04", "rev": 546824892.0, "disc": 9597845.0, "orders": 1391.0, "roas": 56.973715662213756}, {"ym": "2025-05", "rev": 420111000.0, "disc": 7451245.0, "orders": 1090.0, "roas": 56.38131614247015}, {"ym": "2025-06", "rev": 380403264.0, "disc": 6759709.0, "orders": 975.0, "roas": 56.27509468233026}, {"ym": "2025-07", "rev": 327209936.0, "disc": 5565409.0, "orders": 797.0, "roas": 58.79351113278467}, {"ym": "2025-08", "rev": 363651255.0, "disc": 5874691.0, "orders": 850.0, "roas": 61.90134170461051}, {"ym": "2025-09", "rev": 547314273.0, "disc": 7566809.0, "orders": 1224.0, "roas": 72.33092218926102}, {"ym": "2025-10", "rev": 795018928.0, "disc": 11884399.0, "orders": 1710.0, "roas": 66.8960145144908}, {"ym": "2025-11", "rev": 789296473.0, "disc": 11157509.0, "orders": 1610.0, "roas": 70.74128042379351}, {"ym": "2025-12", "rev": 625294864.0, "disc": 8279636.0, "orders": 1191.0, "roas": 75.52202343194797}, {"ym": "2026-01", "rev": 554694605.0, "disc": 7643073.0, "orders": 1100.0, "roas": 72.57481447580051}, {"ym": "2026-02", "rev": 521404736.090909, "disc": 7782918.0, "orders": 1112.0, "roas": 66.99347675138155}, {"ym": "2026-03", "rev": 576417064.0, "disc": 8858054.0, "orders": 1267.0, "roas": 65.07265184881464}, {"ym": "2026-04", "rev": 345578727.0, "disc": 6001118.0, "orders": 860.0, "roas": 57.585724360027584}], "bysegment": [{"segment": "다건구매", "rev": 5933186764.890909, "disc": 123510551.98181818, "orders": 13108.0, "n": 32, "roas": 48.03789368348322}, {"segment": "단건구매", "rev": 1985249698.1818182, "disc": 50810485.43636364, "orders": 4529.0, "n": 31, "roas": 39.071653835470556}, {"segment": "미구매(6개월 미구매)", "rev": 3444207037.0, "disc": 77684718.0, "orders": 8289.0, "n": 31, "roas": 44.33570881984794}]}, "abandon": {"n": 39, "rev": 2724494632.0, "orders": 10473, "recipients": 331210, "coupon_cost": 75026951.0, "sms_cost": 7882798.0, "avg_ctr": 0.0602, "avg_roas": 33.1443, "blended_roas": 32.861, "net": 2641584883.0, "series": [{"lab": "24.11", "rev": 865730.0, "roas": 8.708453455598184, "ctr": 0.12832176203016518, "ord": 5}, {"lab": "24.11", "rev": 87522327.0, "roas": 36.50910755375544, "ctr": 0.05213644088370964, "ord": 270}, {"lab": "24.12", "rev": 116225736.0, "roas": 35.67264477784332, "ctr": 0.029853584331621982, "ord": 402}, {"lab": "24.12", "rev": 143280273.0, "roas": 36.08128957023056, "ctr": 0.029151186053158046, "ord": 490}, {"lab": "1월 2일", "rev": 105331082.0, "roas": 35.56605189206886, "ctr": 0.02783244307000281, "ord": 346}, {"lab": "1월 23일", "rev": 80070509.0, "roas": 33.29050220983169, "ctr": 0.017722202231018353, "ord": 277}, {"lab": "1월 31일", "rev": 140262785.0, "roas": 36.85902027904872, "ctr": 0.026967701473816243, "ord": 449}, {"lab": "3월 12일", "rev": 131764009.0, "roas": 31.054592576660394, "ctr": 0.11384071933204881, "ord": 565}, {"lab": "3월 25일", "rev": 101641773.0, "roas": 30.728526367935217, "ctr": 0.0389210716871832, "ord": 434}, {"lab": "25.04", "rev": 54562691.0, "roas": 24.228929264696255, "ctr": 0.03232546705998034, "ord": 278}, {"lab": "25.04", "rev": 65517191.0, "roas": 26.802507450982894, "ctr": 0.035474716202270384, "ord": 337}, {"lab": "25.05", "rev": 66548073.0, "roas": 26.719045140072478, "ctr": 0.04867034621174109, "ord": 365}, {"lab": "25.06", "rev": 77295900.0, "roas": 26.966098571655934, "ctr": 0.04811114938569296, "ord": 446}, {"lab": "25.07", "rev": 53996755.0, "roas": 26.906835065739344, "ctr": 0.03548485775466503, "ord": 304}, {"lab": "25.08", "rev": 54245673.0, "roas": 28.81608400412435, "ctr": 0.049494949494949494, "ord": 288}, {"lab": "25.09", "rev": 90787909.0, "roas": 31.158381643264793, "ctr": 0.03681603242512948, "ord": 382}, {"lab": "25.10", "rev": 141991200.0, "roas": 35.79723131088459, "ctr": 0.03447256968383729, "ord": 491}, {"lab": "25.11", "rev": 129153927.0, "roas": 39.461014375410564, "ctr": 0.0839493136219641, "ord": 392}, {"lab": "25.12", "rev": 54078945.0, "roas": 36.69982405728542, "ctr": 0.06705480827143144, "ord": 187}, {"lab": "25.12", "rev": 70174045.0, "roas": 40.509554496786265, "ctr": 0.07809676771732584, "ord": 213}, {"lab": "25.12", "rev": 42918582.0, "roas": 33.07062074496423, "ctr": 0.05910710542863131, "ord": 156}, {"lab": "25.12", "rev": 48095236.0, "roas": 38.90347342936945, "ctr": 0.05744234800838575, "ord": 165}, {"lab": "26.12", "rev": 70831945.0, "roas": 35.55617048020344, "ctr": 0.09211356466876972, "ord": 253}, {"lab": "25.12", "rev": 6255727.0, "roas": 33.066123504400906, "ctr": 0.0835509138381201, "ord": 23}, {"lab": "26.12", "rev": 35736009.0, "roas": 43.58484663470088, "ctr": 0.0740543420351625, "ord": 95}, {"lab": "25.12", "rev": 66146091.0, "roas": 36.300764254448545, "ctr": 0.09970149253731343, "ord": 233}, {"lab": "25.12", "rev": 3097600.0, "roas": 27.472975801502074, "ctr": 0.08695652173913043, "ord": 14}, {"lab": "25.12", "rev": 27376264.0, "roas": 33.723174530280964, "ctr": 0.07310239429444727, "ord": 104}, {"lab": "26.01", "rev": 70984009.0, "roas": 42.53384389438924, "ctr": 0.09726177437020811, "ord": 200}, {"lab": "26.01", "rev": 6040055.0, "roas": 41.143163281014786, "ctr": 0.09821428571428571, "ord": 15}, {"lab": "26.01", "rev": 24904718.0, "roas": 35.13046591382281, "ctr": 0.0890251021599533, "ord": 82}, {"lab": "26.01", "rev": 64882927.0, "roas": 40.0447872840083, "ctr": 0.0967741935483871, "ord": 191}, {"lab": "26.01", "rev": 5179955.0, "roas": 36.99291415284062, "ctr": 0.060897435897435896, "ord": 18}, {"lab": "26.01", "rev": 32628045.0, "roas": 38.818584401394176, "ctr": 0.08311170212765957, "ord": 94}, {"lab": "26.01", "rev": 77052200.0, "roas": 38.37085535631389, "ctr": 0.050722862043616763, "ord": 253}, {"lab": "26.02", "rev": 60247591.0, "roas": 30.332314999463815, "ctr": 0.04199772985244041, "ord": 239}, {"lab": "26.03", "rev": 153781718.0, "roas": 30.53521490213035, "ctr": 0.01692498903348443, "ord": 592}, {"lab": "26.04", "rev": 82331118.0, "roas": 24.2100559790763, "ctr": 0.029534412181032175, "ord": 423}, {"lab": "26.05", "rev": 80688309.0, "roas": 24.299799068463084, "ctr": 0.043339960238568585, "ord": 402}]}, "cart": {"n": 20, "rev": 76980119.0909, "orders": 555, "recipients": 897999, "avg_ctr": 0.0301, "avg_cr": 0.0204, "avg_roas": 10.4908, "period": ["2024-08-20", "2026-05-14"], "series": [{"date": "2024-08-20", "CTR": 0.03503574849099049, "CR": 0.019071837253655435, "ROAS": 7.547302715103459, "rev": 2710810.0, "recip": 44897.0}, {"date": "2024-09-05", "CTR": 0.030258662762323085, "CR": 0.01971326164874552, "ROAS": 7.725719863347974, "rev": 1139760.0, "recip": 18441.0}, {"date": "2024-09-26", "CTR": 0.030811533124325434, "CR": 0.02335279399499583, "ROAS": 13.443715629336486, "rev": 4185190.0, "recip": 38914.0}, {"date": "2024-10-23", "CTR": 0.025490196078431372, "CR": 0.026525198938992044, "ROAS": 15.297329276538202, "rev": 7239920.0, "recip": 59160.0}, {"date": "2024-11-08", "CTR": 0.026957450942296485, "CR": 0.01981981981981982, "ROAS": 7.800964153876044, "rev": 1284850.0, "recip": 20588.0}, {"date": "2024-12-03", "CTR": 0.02792481908335567, "CR": 0.029994001199760048, "ROAS": 10.328099872688288, "rev": 4932370.0, "recip": 59696.0}, {"date": "2025-04-01", "CTR": 0.035109184795006326, "CR": 0.019492025989367986, "ROAS": 12.998849049169449, "rev": 5014540.0, "recip": 48221.0}, {"date": "2025-05-02", "CTR": 0.02451059699077819, "CR": 0.028877887788778877, "ROAS": 14.938951019252547, "rev": 5909610.0, "recip": 49448.0}, {"date": "2025-06-05", "CTR": 0.028115912965005516, "CR": 0.014265335235378032, "ROAS": 3.8056251880076206, "rev": 1518140.0, "recip": 49865.0}, {"date": "2025-07-04", "CTR": 0.02934732229385244, "CR": 0.028715003589375447, "ROAS": 13.577297433952724, "rev": 5155680.0, "recip": 47466.0}, {"date": "2025-08-08", "CTR": 0.032247972468895145, "CR": 0.017164179104477612, "ROAS": 7.030900296007508, "rev": 2337240.0, "recip": 41553.0}, {"date": "2025-09-12", "CTR": 0.03206627195382855, "CR": 0.01474010861132661, "ROAS": 6.615627643166326, "rev": 2127480.0, "recip": 40198.0}, {"date": "2025-10-11", "CTR": 0.040136921941069874, "CR": 0.023968784838350056, "ROAS": 19.135596348748237, "rev": 6842430.0, "recip": 44697.0}, {"date": "2025-11-06", "CTR": 0.02952429901204957, "CR": 0.01096067053513862, "ROAS": 7.644242666514382, "rev": 3212600.0, "recip": 52533.0}, {"date": "2025-12-09", "CTR": 0.040699729061137946, "CR": 0.016401350699469366, "ROAS": 9.200965955942985, "rev": 3749136.0, "recip": 50934.0}, {"date": "2026-01-13", "CTR": 0.029632886348648056, "CR": 0.014094955489614243, "ROAS": 12.805957353264454, "rev": 4660344.0, "recip": 45490.0}, {"date": "2026-02-19", "CTR": 0.01770923900608612, "CR": 0.014211886304909561, "ROAS": 7.303657080575581, "rev": 2553709.090909091, "recip": 43706.0}, {"date": "2026-03-20", "CTR": 0.029067122961294375, "CR": 0.00819672131147541, "ROAS": 4.820455825337348, "rev": 1780445.0, "recip": 46169.0}, {"date": "2026-04-16", "CTR": 0.03109199151851248, "CR": 0.024918032786885248, "ROAS": 10.878328372206818, "rev": 4268482.0, "recip": 49048.0}, {"date": "2026-05-14", "CTR": 0.026929217668972858, "CR": 0.03320158102766799, "ROAS": 16.91693187865886, "rev": 6357383.0, "recip": 46975.0}]}, "campaign": {"n": 71, "rev": 385613974.0, "buyers": 1862, "reach": 1843117, "avg_ctr": 0.0571, "avg_roas": 33.4229, "period": ["2026-03-20", "2026-05-28"], "bytype": [{"type": "라이브 알림/본방", "rev": 161030332.0, "n": 23, "roas": 26.160849903707142, "ctr": 0.041222814999999774, "reach": 986930.0, "buyers": 814.0}, {"type": "라이브 재방송", "rev": 115561596.0, "n": 21, "roas": 62.254036033690014, "ctr": 0.08119206400986859, "reach": 271315.0, "buyers": 471.0}, {"type": "영컨템(3BPU)", "rev": 33969039.0, "n": 9, "roas": 14.586123575266413, "ctr": 0.06337303193525706, "reach": 86646.0, "buyers": 227.0}, {"type": "아울렛(2BPU)", "rev": 30293154.0, "n": 4, "roas": 15.445039275879425, "ctr": 0.032708885876843355, "reach": 219753.0, "buyers": 158.0}, {"type": "프리미엄(1BPU)", "rev": 22983999.0, "n": 5, "roas": 29.718171813915774, "ctr": 0.046055064662376896, "reach": 78109.0, "buyers": 87.0}, {"type": "기타 프로모션", "rev": 21775854.0, "n": 9, "roas": 13.593959935528689, "ctr": 0.051936262621757406, "reach": 200364.0, "buyers": 105.0}], "scatter": [{"name": "MKT_라이브재방_닥스키즈_260320_SMS", "type": "라이브 재방송", "CTR": 0.07408044001375043, "ROAS": 69.19941345823307, "rev": 6441635.0, "reach": 11636.0}, {"name": "MKT_라코스테_260321_SMS", "type": "기타 프로모션", "CTR": 0.07135276349089721, "ROAS": 28.11091721773206, "rev": 2754645.0, "reach": 12249.0}, {"name": "MKT_라코스테_260321_LMS", "type": "기타 프로모션", "CTR": 0.043859649122807015, "ROAS": 20.011590508779687, "rev": 2063227.0, "reach": 4332.0}, {"name": "MKT_3bpu_영컨템_올리브데올리브_260323_LMS", "type": "영컨템(3BPU)", "CTR": 0.07434077079107505, "ROAS": 10.697666490531304, "rev": 2510400.0, "reach": 9860.0}, {"name": "MKT_라이브재방_바버고관여_260323_SMS", "type": "라이브 재방송", "CTR": 0.21005347593582888, "ROAS": 185.68548128342246, "rev": 6944637.0, "reach": 4675.0}, {"name": "MKT_3bpu_영컨템_울랄라_260324_LMS", "type": "영컨템(3BPU)", "CTR": 0.0738440962934658, "ROAS": 20.722654556664086, "rev": 5162809.0, "reach": 10468.0}, {"name": "MKT_1BPU_시크릿_260324_SMS", "type": "프리미엄(1BPU)", "CTR": 0.050198218606806365, "ROAS": 16.218413736292025, "rev": 2520082.0, "reach": 19423.0}, {"name": "MKT_라이브_헤지스닥스골프_260324_SMS", "type": "라이브 알림/본방", "CTR": 0.05106412867879469, "ROAS": 45.95137230455855, "rev": 10467355.0, "reach": 28474.0}, {"name": "MKT_1BPU_시크릿_260324_SMS_추가", "type": "프리미엄(1BPU)", "CTR": 0.008581566135819787, "ROAS": 0.2984157108672333, "rev": 57864.0, "reach": 24238.0}, {"name": "MKT_3bpu_영컨템_쏭스튜디오_260325_LMS", "type": "영컨템(3BPU)", "CTR": 0.05495118549511855, "ROAS": 12.525133902933558, "rev": 3206046.0, "reach": 10755.0}, {"name": "MKT_3bpu_영컨템_룩캐스트_260326_LMS", "type": "영컨템(3BPU)", "CTR": 0.05348249176308329, "ROAS": 14.515337051991896, "rev": 4508664.0, "reach": 13051.0}, {"name": "MKT_라이브알림_남성연합_260326_SMS_2차", "type": "라이브 알림/본방", "CTR": 0.03609613656783468, "ROAS": 14.472197888589397, "rev": 5154418.0, "reach": 44520.0}, {"name": "MKT_라이브알림_남성연합_260326_SMS_1차", "type": "라이브 알림/본방", "CTR": 0.04350316250809303, "ROAS": 16.12598984013148, "rev": 5180700.0, "reach": 40158.0}, {"name": "MKT_3bpu_영컨템_트위_260327_LMS", "type": "영컨템(3BPU)", "CTR": 0.05611018672582733, "ROAS": 14.91575665207847, "rev": 3840336.0, "reach": 10818.0}, {"name": "MKT_3bpu_영컨템_제너럴아이디어_260328_LMS", "type": "영컨템(3BPU)", "CTR": 0.05996919014084507, "ROAS": 5.525468990413067, "rev": 1195128.0, "reach": 9088.0}, {"name": "MKT_3bpu_영컨템_앳코너_260329_LMS", "type": "영컨템(3BPU)", "CTR": 0.09526009424374018, "ROAS": 43.34493845584062, "rev": 11165110.0, "reach": 10823.0}, {"name": "MKT_3bpu_영컨템_앳코너_260329_SMS_임직원", "type": "영컨템(3BPU)", "CTR": 0.029829545454545456, "ROAS": 0.0, "rev": 0.0, "reach": 704.0}, {"name": "MKT_20260330_포터리_LMS", "type": "기타 프로모션", "CTR": 0.07014308426073132, "ROAS": 7.098464950368064, "rev": 2656636.0, "reach": 15725.0}, {"name": "MKT_라이브재방_헤지스닥스_260330_SMS", "type": "라이브 재방송", "CTR": 0.06895801609745486, "ROAS": 40.39777300413313, "rev": 2971337.0, "reach": 9194.0}, {"name": "MKT_라이브재방_이자벨마랑빠투_260331_SMS_최종", "type": "라이브 재방송", "CTR": 0.07773851590106007, "ROAS": 47.61906809869196, "rev": 12290291.0, "reach": 32262.0}, {"name": "MKT_3BPU_시야주반원아틀리에_260401_LMS", "type": "영컨템(3BPU)", "CTR": 0.07256972650961278, "ROAS": 9.028156076944724, "rev": 2380546.0, "reach": 11079.0}, {"name": "MKT_라이브재방_리복_260401_SMS", "type": "라이브 재방송", "CTR": 0.05535178392797599, "ROAS": 12.230879043014339, "rev": 1173773.0, "reach": 11996.0}, {"name": "MKT_라이브알림_르무통_260402_SMS", "type": "라이브 알림/본방", "CTR": 0.017901748542880933, "ROAS": 6.267502081598668, "rev": 3010908.0, "reach": 60050.0}, {"name": "MKT_영업1BPU_봄날의혜택_20260403_LMS", "type": "프리미엄(1BPU)", "CTR": 0.0738796666885375, "ROAS": 34.90864976657942, "rev": 12662617.0, "reach": 15241.0}, {"name": "MKT_2BPU_아울렛미드세일_20260403_LMS", "type": "아울렛(2BPU)", "CTR": 0.039927587247309666, "ROAS": 8.1269200831293, "rev": 1923182.0, "reach": 9943.0}, {"name": "MKT_라이브재방_히스헤지스_260403_SMS", "type": "라이브 재방송", "CTR": 0.1385266126189637, "ROAS": 103.79602132534367, "rev": 4711509.0, "reach": 5674.0}, {"name": "MKT_라이브재방_헤지스닥스골프_260406_SMS", "type": "라이브 재방송", "CTR": 0.07647375988497483, "ROAS": 67.28460864485982, "rev": 5989945.0, "reach": 11128.0}, {"name": "MKT_라이브알림_티엔지티_260407_SMS", "type": "라이브 알림/본방", "CTR": 0.05187964499603146, "ROAS": 31.97630601053467, "rev": 14181108.0, "reach": 55436.0}, {"name": "MKT_정상여성_20260407_LMS", "type": "기타 프로모션", "CTR": 0.06732191006349482, "ROAS": 18.19287530616317, "rev": 4978091.0, "reach": 11497.0}, {"name": "MKT_라이브알림_빈스바쉬빠투_260408_SMS", "type": "라이브 알림/본방", "CTR": 0.027046963363658718, "ROAS": 18.276455763028103, "rev": 10108927.0, "reach": 69139.0}, {"name": "MKT_2bpu_20260408_SMS", "type": "아울렛(2BPU)", "CTR": 0.039783277443671536, "ROAS": 34.04562051381537, "rev": 19655490.0, "reach": 72166.0}, {"name": "MKT_헤지스_260408_LMS_최종", "type": "기타 프로모션", "CTR": 0.026678265912715673, "ROAS": 3.4735721169720604, "rev": 570182.0, "reach": 6897.0}, {"name": "MKT_라이브재방_히스헤지스_260409_SMS", "type": "라이브 재방송", "CTR": 0.0609940300654535, "ROAS": 11.719017478242106, "rev": 1303436.0, "reach": 13903.0}, {"name": "MKT_라이브재방_빈스바쉬빠투_260410_SMS", "type": "라이브 재방송", "CTR": 0.0775480059084195, "ROAS": 89.22530465288035, "rev": 7731908.0, "reach": 10832.0}, {"name": "MKT_라이브재방_TNGT_260413_SMS", "type": "라이브 재방송", "CTR": 0.08448631145128054, "ROAS": 71.47849818467274, "rev": 5827499.0, "reach": 10191.0}, {"name": "MKT_라이브알림_리바이스_260414_SMS", "type": "라이브 알림/본방", "CTR": 0.06049405820155329, "ROAS": 10.765790212407598, "rev": 1840864.0, "reach": 21374.0}, {"name": "MKT_아울렛_EGM_0414_SMS", "type": "기타 프로모션", "CTR": 0.01763584366062917, "ROAS": 5.08426211386731, "rev": 4010710.0, "reach": 98606.0}, {"name": "MKT_라이브알림_닥스골프_260415_SMS", "type": "라이브 알림/본방", "CTR": 0.025818970437164707, "ROAS": 11.41811151695012, "rev": 4001363.0, "reach": 43805.0}, {"name": "MKT_2BPU_EGM리마인드_260415_SMS", "type": "아울렛(2BPU)", "CTR": 0.001779676098949991, "ROAS": 1.3925965474283681, "rev": 939000.0, "reach": 84285.0}, {"name": "MKT_2bpu_아울렛_20260416_SMS_최종발송", "type": "아울렛(2BPU)", "CTR": 0.04934500271744223, "ROAS": 18.215019959144662, "rev": 7775482.0, "reach": 53359.0}, {"name": "MKT_202630416_헤지스남성", "type": "기타 프로모션", "CTR": 0.036379385015158076, "ROAS": 6.77499729320052, "rev": 1501773.0, "reach": 27708.0}, {"name": "MKT_라이브재방_일꼬르소_260416_SMS_최종", "type": "라이브 재방송", "CTR": 0.09621811785400176, "ROAS": 60.464138082673706, "rev": 2749909.0, "reach": 5685.0}, {"name": "MKT_정상여성_20260416", "type": "기타 프로모션", "CTR": 0.06485448367557985, "ROAS": 20.2363809277589, "rev": 2191681.0, "reach": 13538.0}, {"name": "MKT_킨_20260416", "type": "기타 프로모션", "CTR": 0.0692009783938035, "ROAS": 13.362578984916428, "rev": 1048909.0, "reach": 9812.0}, {"name": "MKT_라이브재방_더블플래그_260420_SMS", "type": "라이브 재방송", "CTR": 0.050769001045244136, "ROAS": 62.23325742869942, "rev": 3334209.0, "reach": 6697.0}, {"name": "MKT_라이브_아떼ACC_260421_SMS", "type": "라이브 알림/본방", "CTR": 0.014493543289925352, "ROAS": 7.093836838663979, "rev": 2083091.0, "reach": 36706.0}, {"name": "MKT_라이브알림_콜한_260422_SMS", "type": "라이브 알림/본방", "CTR": 0.04233380836616649, "ROAS": 18.205696202531644, "rev": 5212218.0, "reach": 35787.0}, {"name": "MKT_라이브알림_페어라이어_260423_SMS", "type": "라이브 알림/본방", "CTR": 0.040186731910346184, "ROAS": 32.07061151888411, "rev": 9123191.0, "reach": 35559.0}, {"name": "MKT_라이브알림_닥스_260427_SMS", "type": "라이브 알림/본방", "CTR": 0.007949583985501277, "ROAS": 2.9389673778729715, "rev": 1141636.0, "reach": 48556.0}, {"name": "MKT_라이브알림_바버_260428_SMS", "type": "라이브 알림/본방", "CTR": 0.04301501954326303, "ROAS": 30.173396857205216, "rev": 12166155.0, "reach": 50401.0}, {"name": "MKT_1BPU_닥스아모레_20260428_LMS", "type": "프리미엄(1BPU)", "CTR": 0.03240261978628059, "ROAS": 29.259106055383203, "rev": 2037136.0, "reach": 8703.0}, {"name": "MKT_라이브알림_콜한_260430_SMS", "type": "라이브 알림/본방", "CTR": 0.08886049483099083, "ROAS": 64.56639853641538, "rev": 4446817.0, "reach": 8609.0}, {"name": "MKT_라이브알림_페어라이어_260430_SMS", "type": "라이브 알림/본방", "CTR": 0.09923954372623574, "ROAS": 103.72583174904943, "rev": 4364783.0, "reach": 5260.0}, {"name": "MKT_라이브재방_닥스_260504_SMS", "type": "라이브 재방송", "CTR": 0.04970704970704971, "ROAS": 71.16790894915894, "rev": 12049581.0, "reach": 21164.0}, {"name": "MKT_라이브재방_이자벨마랑콜한아떼_260505_SMS", "type": "라이브 재방송", "CTR": 0.03362273086029992, "ROAS": 20.972774269928966, "rev": 5314501.0, "reach": 31675.0}, {"name": "MKT_라이브재방_아떼ACC_260506_SMS", "type": "라이브 재방송", "CTR": 0.05032558139534884, "ROAS": 12.957709302325581, "rev": 1114363.0, "reach": 10750.0}, {"name": "MKT_라이브재방_바버_260507_SMS", "type": "라이브 재방송", "CTR": 0.10752486395196097, "ROAS": 103.33412694689436, "rev": 8810681.0, "reach": 10658.0}, {"name": "MKT_라이브재방_닥스_260508_SMS", "type": "라이브 재방송", "CTR": 0.044349756946528235, "ROAS": 42.86374752445538, "rev": 5713909.0, "reach": 16663.0}, {"name": "MKT_1BPU_여성_260509_LMS", "type": "프리미엄(1BPU)", "CTR": 0.06521325209444022, "ROAS": 67.90627380045697, "rev": 5706300.0, "reach": 10504.0}, {"name": "MKT_라이브알림_TNGT_260512_SMS", "type": "라이브 알림/본방", "CTR": 0.052316476022441175, "ROAS": 28.8603671470769, "rev": 11646428.0, "reach": 50443.0}, {"name": "MKT_라이브알림_이자벨마랑_260513_SMS", "type": "라이브 알림/본방", "CTR": 0.05502279124218497, "ROAS": 57.103491543577356, "rev": 18340271.0, "reach": 40147.0}, {"name": "MKT_라이브알림_질스튜어트ACC_260514_SMS", "type": "라이브 알림/본방", "CTR": 0.025566465256797583, "ROAS": 4.98982958836858, "rev": 2114091.0, "reach": 52960.0}, {"name": "MKT_라이브재방_이자벨마랑_260515_SMS", "type": "라이브 재방송", "CTR": 0.06891172692237107, "ROAS": 179.92635116535143, "rev": 15686699.0, "reach": 10898.0}, {"name": "MKT_라이브알림_오리고_260518_SMS", "type": "라이브 알림/본방", "CTR": 0.026546441729687804, "ROAS": 10.814075528407988, "rev": 4461455.0, "reach": 51570.0}, {"name": "MKT_라이브재방_아떼ACC_260506_SMS", "type": "라이브 재방송", "CTR": 0.12238180730101736, "ROAS": 27.792882256134053, "rev": 2972282.0, "reach": 13368.0}, {"name": "MKT_라이브재방_리바이스_260520_SMS", "type": "라이브 재방송", "CTR": 0.10030849770963822, "ROAS": 9.761662148265868, "rev": 835364.0, "reach": 10697.0}, {"name": "MKT_라이브본방_티톤브로스_260521_SMS", "type": "라이브 알림/본방", "CTR": 0.01884270518127982, "ROAS": 4.807927395251267, "rev": 2071909.0, "reach": 53867.0}, {"name": "MKT_라이브재방_질스튜어트ACC_260525_SMS", "type": "라이브 재방송", "CTR": 0.05670325870861786, "ROAS": 17.224133460108913, "rev": 1594128.0, "reach": 11569.0}, {"name": "MKT_라이브알림_헤지스골프_260526_SMS", "type": "라이브 알림/본방", "CTR": 0.04782896186907648, "ROAS": 47.69031481889648, "rev": 15578709.0, "reach": 40833.0}, {"name": "MKT_라이브알림_바버_260527_SMS", "type": "라이브 알림/본방", "CTR": 0.04464544838928122, "ROAS": 19.980984569991293, "rev": 6609390.0, "reach": 41348.0}, {"name": "MKT_라이브알림_바네사브루노_260528_SMS", "type": "라이브 알림/본방", "CTR": 0.02747191636080525, "ROAS": 13.424092495273051, "rev": 7724545.0, "reach": 71928.0}], "top": [{"name": "MKT_2bpu_20260408_SMS", "type": "아울렛(2BPU)", "rev": 19655490.0, "ROAS": 34.04562051381537, "CTR": 0.039783277443671536, "발송일": "04/08"}, {"name": "MKT_라이브알림_이자벨마랑_260513_SMS", "type": "라이브 알림/본방", "rev": 18340271.0, "ROAS": 57.103491543577356, "CTR": 0.05502279124218497, "발송일": "05/13"}, {"name": "MKT_라이브재방_이자벨마랑_260515_SMS", "type": "라이브 재방송", "rev": 15686699.0, "ROAS": 179.92635116535143, "CTR": 0.06891172692237107, "발송일": "05/15"}, {"name": "MKT_라이브알림_헤지스골프_260526_SMS", "type": "라이브 알림/본방", "rev": 15578709.0, "ROAS": 47.69031481889648, "CTR": 0.04782896186907648, "발송일": "05/26"}, {"name": "MKT_라이브알림_티엔지티_260407_SMS", "type": "라이브 알림/본방", "rev": 14181108.0, "ROAS": 31.97630601053467, "CTR": 0.05187964499603146, "발송일": "04/07"}, {"name": "MKT_영업1BPU_봄날의혜택_20260403_LMS", "type": "프리미엄(1BPU)", "rev": 12662617.0, "ROAS": 34.90864976657942, "CTR": 0.0738796666885375, "발송일": "04/03"}, {"name": "MKT_라이브재방_이자벨마랑빠투_260331_SMS_최종", "type": "라이브 재방송", "rev": 12290291.0, "ROAS": 47.61906809869196, "CTR": 0.07773851590106007, "발송일": "03/31"}, {"name": "MKT_라이브알림_바버_260428_SMS", "type": "라이브 알림/본방", "rev": 12166155.0, "ROAS": 30.173396857205216, "CTR": 0.04301501954326303, "발송일": "04/28"}]}, "grand": {"total_rev": 14549732225.1636, "total_orders": 38816, "total_sends": 224}};
+const CUR = getComputedStyle(document.documentElement);
+function cvar(n){return getComputedStyle(document.body).getPropertyValue(n).trim();}
+const NS="http://www.w3.org/2000/svg";
+function el(t,a){const e=document.createElementNS(NS,t);for(const k in(a||{}))e.setAttribute(k,a[k]);return e;}
+function won(v){ // to 억 with 1 decimal
+  return (v/1e8).toLocaleString('ko-KR',{minimumFractionDigits:1,maximumFractionDigits:1});
+}
+function comma(v){return Math.round(v).toLocaleString('ko-KR');}
+
+/* tooltip */
+const tt=document.getElementById('tt');
+function showTT(html,x,y){tt.innerHTML=html;tt.style.opacity=1;let px=x+14,py=y+14;
+  const w=tt.offsetWidth,h=tt.offsetHeight;
+  if(px+w>innerWidth-8)px=x-w-14; if(py+h>innerHeight-8)py=y-h-14;
+  tt.style.left=px+'px';tt.style.top=py+'px';}
+function hideTT(){tt.style.opacity=0;}
+
+/* ---------- fill scalar text ---------- */
+document.getElementById('h-rev').textContent = won(D.grand.total_rev);
+document.getElementById('h-sends').textContent = comma(D.grand.total_sends);
+document.getElementById('h-orders').textContent = comma(D.grand.total_orders);
+document.getElementById('h-roas').textContent = D.retention.roas.toFixed(1);
+document.getElementById('ret-headline').textContent = won(D.retention.total_rev);
+document.getElementById('cp-n').textContent = D.campaign.n;
+
+/* KPI band */
+const kpis=[
+ {l:'누적 기여 매출', v:won(D.grand.total_rev), u:'억원', d:'4개 프로그램 · 25개월', accent:true},
+ {l:'운영 캠페인 발송', v:comma(D.grand.total_sends), u:'건', d:'SMS · LMS 라이프사이클'},
+ {l:'누적 주문 전환', v:comma(D.grand.total_orders), u:'건', d:'자동화 메시지 기여'},
+ {l:'정기 리텐션 ROAS', v:D.retention.roas.toFixed(1), u:'x', d:'매출 113.6억 / 비용 2.5억'},
+ {l:'이탈 재유입 ROAS', v:D.abandon.avg_roas.toFixed(1), u:'x', d:'결제 이탈 트리거 · EV12'},
+];
+document.getElementById('kpis').innerHTML=kpis.map(k=>
+ `<div class="kpi${k.accent?' accent':''}"><div class="kl">${k.l}</div>
+  <div class="kv tnum">${k.v}<span class="u">${k.u}</span></div><div class="kd">${k.d}</div></div>`).join('');
+
+/* ===== CH1 efficiency bar ===== */
+(function(){
+  const rev=D.abandon.rev, cost=D.abandon.coupon_cost+D.abandon.sms_cost;
+  const total=rev; // scale by revenue
+  const cpct=Math.max(cost/total*100,.6), rpct=100;
+  document.getElementById('eff-abandon').innerHTML=
+   `<div class="track" title="">
+      <div class="seg-rev" style="flex:1"></div>
+    </div>
+    <div class="track" style="margin-top:8px">
+      <div class="seg-cost" style="width:${(cost/rev*100).toFixed(2)}%"></div>
+    </div>
+    <div class="lab"><span><span class="dot" style="background:var(--s2)"></span>발생 매출 ${won(rev)}억</span>
+    <span><span class="dot" style="background:var(--s6)"></span>투입 비용 ${won(cost)}억 (${(cost/rev*100).toFixed(1)}%)</span></div>`;
+  document.getElementById('ab-rev').innerHTML=won(rev)+'<span class="u">억</span>';
+  document.getElementById('ab-net').innerHTML=won(D.abandon.net)+'<span class="u">억</span>';
+  document.getElementById('ab-roas').innerHTML=D.abandon.avg_roas.toFixed(1)+'<span class="u">x</span>';
+})();
+
+/* ===== CH1 per-send revenue bars + ROAS overlay ===== */
+(function(){
+  const s=D.abandon.series;
+  const W=560,H=300,mL=40,mR=34,mT=14,mB=40;
+  const iw=W-mL-mR, ih=H-mT-mB;
+  const n=s.length, gap=iw/n, bw=gap*0.62;
+  const maxRev=Math.max(...s.map(d=>d.rev))*1.1;
+  const maxRoas=Math.max(...s.map(d=>d.roas))*1.1;
+  const yR=v=>mT+ih*(1-v/maxRev);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  const g=el('g',{class:'grid'});
+  for(let t=0;t<=3;t++){const yy=mT+ih*t/3;g.appendChild(el('line',{x1:mL,y1:yy,x2:W-mR,y2:yy}));}
+  svg.appendChild(g);
+  const ax=el('g',{class:'axis'});
+  for(let t=0;t<=3;t++){const yy=mT+ih*t/3;const val=maxRev*(1-t/3)/1e6;const tx=el('text',{x:mL-7,y:yy+3,'text-anchor':'end'});tx.textContent=val.toFixed(0);ax.appendChild(tx);}
+  svg.appendChild(ax);
+  s.forEach((d,i)=>{
+    const cx=mL+gap*i+gap/2;
+    const h=mT+ih-yR(d.rev);
+    const r=el('rect',{x:cx-bw/2,y:yR(d.rev),width:bw,height:Math.max(h,1),rx:2,fill:'var(--s2)',class:'hoverable'});
+    r.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.lab||('#'+(i+1))}</div>매출 <b>${won(d.rev)}억</b> · 주문 <b>${comma(d.ord)}건</b><br>ROAS <b>${d.roas.toFixed(1)}x</b> · CTR <b>${(d.ctr*100).toFixed(1)}%</b>`,e.clientX,e.clientY));
+    r.addEventListener('mouseleave',hideTT);
+    svg.appendChild(r);
+  });
+  // ROAS line on right axis
+  const yRo=v=>mT+ih*(1-v/maxRoas);
+  const xC=i=>mL+gap*i+gap/2;
+  let dd='';s.forEach((d,i)=>dd+=(i?'L':'M')+xC(i)+' '+yRo(d.roas));
+  svg.appendChild(el('path',{d:dd,fill:'none',stroke:'var(--s5)','stroke-width':1.8,'stroke-opacity':.85,'stroke-linejoin':'round'}));
+  for(let t=0;t<=3;t++){const yy=mT+ih*t/3;const val=maxRoas*(1-t/3);const tx=el('text',{x:W-mR+6,y:yy+3,'text-anchor':'start',class:'axis'});tx.setAttribute('fill','var(--s5)');tx.textContent=val.toFixed(0)+'x';svg.appendChild(tx);}
+  const cap=el('text',{x:mL,y:H-8,class:'axis'});cap.setAttribute('fill','var(--muted)');cap.style.fontSize='10px';cap.textContent='막대=매출(백만원) · 선=ROAS';svg.appendChild(cap);
+  document.getElementById('ch-abandon-bars').appendChild(svg);
+})();
+
+/* ===== CH2 cart lines ===== */
+(function(){
+  const s=D.cart.series.filter(d=>d.date);
+  const W=920,H=300,mL=44,mR=44,mT=18,mB=44;
+  const iw=W-mL-mR, ih=H-mT-mB;
+  const n=s.length;
+  const x=i=> mL + (n<=1?iw/2:iw*i/(n-1));
+  const ctr=s.map(d=>d.CTR), cr=s.map(d=>d.CR), roas=s.map(d=>d.ROAS);
+  const maxPct=Math.max(...ctr,...cr)*1.15;
+  const maxRoas=Math.max(...roas)*1.15;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  // grid + left axis (%)
+  const g=el('g',{class:'grid'});
+  for(let t=0;t<=4;t++){const yy=mT+ih*t/4; g.appendChild(el('line',{x1:mL,y1:yy,x2:W-mR,y2:yy}));}
+  svg.appendChild(g);
+  const ax=el('g',{class:'axis'});
+  for(let t=0;t<=4;t++){const yy=mT+ih*t/4; const val=maxPct*(1-t/4)*100;
+    const tx=el('text',{x:mL-8,y:yy+3,'text-anchor':'end'});tx.textContent=val.toFixed(1)+'%';ax.appendChild(tx);}
+  for(let t=0;t<=4;t++){const yy=mT+ih*t/4; const val=maxRoas*(1-t/4);
+    const tx=el('text',{x:W-mR+8,y:yy+3,'text-anchor':'start',fill:'var(--s5)'});tx.textContent=val.toFixed(0)+'x';ax.appendChild(tx);}
+  // x labels (every ~4)
+  s.forEach((d,i)=>{ if(i%4===0||i===n-1){const tx=el('text',{x:x(i),y:H-mB+18,'text-anchor':'middle'});
+    tx.textContent=d.date.slice(2,7); ax.appendChild(tx);}});
+  svg.appendChild(ax);
+  const yP=v=> mT+ih*(1-v/maxPct);
+  const yR=v=> mT+ih*(1-v/maxRoas);
+  function line(vals,yf,color,w){let dd='';vals.forEach((v,i)=>dd+=(i?'L':'M')+x(i)+' '+yf(v));
+    svg.appendChild(el('path',{d:dd,fill:'none',stroke:color,'stroke-width':w,'stroke-linejoin':'round','stroke-linecap':'round'}));}
+  line(roas,yR,'var(--s5)',2);
+  line(ctr,yP,'var(--s1)',2.4);
+  line(cr,yP,'var(--s2)',2.4);
+  // hover dots
+  s.forEach((d,i)=>{
+    [['CTR',d.CTR,'var(--s1)',yP],['CR',d.CR,'var(--s2)',yP],['ROAS',d.ROAS,'var(--s5)',yR]].forEach(()=>{});
+    const hit=el('rect',{x:x(i)-(iw/n/2),y:mT,width:iw/n,height:ih,fill:'transparent',class:'hoverable'});
+    hit.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.date}</div>CTR <b>${(d.CTR*100).toFixed(2)}%</b> · CR <b>${(d.CR*100).toFixed(2)}%</b><br>ROAS <b>${d.ROAS.toFixed(1)}x</b> · 매출 <b>${won(d.rev)}억</b>`,e.clientX,e.clientY));
+    hit.addEventListener('mouseleave',hideTT);
+    svg.appendChild(hit);
+    svg.appendChild(el('circle',{cx:x(i),cy:yP(d.CTR),r:3,fill:'var(--s1)'}));
+    svg.appendChild(el('circle',{cx:x(i),cy:yP(d.CR),r:3,fill:'var(--s2)'}));
+  });
+  document.getElementById('ch-cart-lines').appendChild(svg);
+  document.getElementById('cart-legend').innerHTML=
+   `<span class="li"><span class="sw" style="background:var(--s1)"></span>클릭률 CTR (좌축)</span>
+    <span class="li"><span class="sw" style="background:var(--s2)"></span>전환율 CR (좌축)</span>
+    <span class="li"><span class="sw" style="background:var(--s5)"></span>ROAS (우축)</span>`;
+  document.getElementById('cart-ctr').innerHTML=(D.cart.avg_ctr*100).toFixed(1)+'<span class="u">%</span>';
+  document.getElementById('cart-ord').innerHTML=comma(D.cart.orders)+'<span class="u">건</span>';
+})();
+
+/* ===== CH3 retention monthly: revenue bars (top) + roas line (bottom) ===== */
+(function(){
+  const m=D.retention.monthly;
+  const W=980,H=360,mL=46,mR=16,mT=14,mB=64;
+  const splitY=230; // bars area bottom
+  const iw=W-mL-mR;
+  const n=m.length;
+  const bw=iw/n*0.66, gap=iw/n;
+  const maxRev=Math.max(...m.map(d=>d.rev))*1.12;
+  const barTop=mT, barBot=splitY-24;
+  const yRev=v=> barBot-(barBot-barTop)*(v/maxRev);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  // grid for bars
+  const g=el('g',{class:'grid'});
+  for(let t=0;t<=3;t++){const yy=barTop+(barBot-barTop)*t/3; g.appendChild(el('line',{x1:mL,y1:yy,x2:W-mR,y2:yy}));}
+  svg.appendChild(g);
+  const ax=el('g',{class:'axis'});
+  for(let t=0;t<=3;t++){const yy=barTop+(barBot-barTop)*t/3; const val=maxRev*(1-t/3)/1e8;
+    const tx=el('text',{x:mL-8,y:yy+3,'text-anchor':'end'});tx.textContent=val.toFixed(0)+'억';ax.appendChild(tx);}
+  svg.appendChild(ax);
+  // bars
+  m.forEach((d,i)=>{
+    const cx=mL+gap*i+gap/2;
+    const h=barBot-yRev(d.rev);
+    const r=el('rect',{x:cx-bw/2,y:yRev(d.rev),width:bw,height:Math.max(h,1),rx:3,fill:'var(--s1)',class:'hoverable'});
+    r.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.ym}</div>매출 <b>${won(d.rev)}억</b> · 주문 <b>${comma(d.orders)}건</b><br>ROAS <b>${d.roas.toFixed(1)}x</b>`,e.clientX,e.clientY));
+    r.addEventListener('mouseleave',hideTT);
+    svg.appendChild(r);
+    if(i%2===0){const tx=el('text',{x:cx,y:H-mB+46,'text-anchor':'middle',class:'axis'});tx.setAttribute('fill','var(--muted)');
+      tx.style.fontSize='9.5px';tx.textContent=d.ym.slice(2); svg.appendChild(tx);
+      const t2=svg.lastChild; t2.setAttribute('font-size','9.5');}
+  });
+  // ROAS line lower band
+  const lineTop=splitY+6, lineBot=H-mB+2;
+  const maxR=Math.max(...m.map(d=>d.roas))*1.1;
+  const xC=i=>mL+gap*i+gap/2;
+  const yRo=v=>lineBot-(lineBot-lineTop)*(v/maxR);
+  let dd='';m.forEach((d,i)=>dd+=(i?'L':'M')+xC(i)+' '+yRo(d.roas));
+  // area
+  let ar=dd+`L${xC(n-1)} ${lineBot}L${xC(0)} ${lineBot}Z`;
+  svg.appendChild(el('path',{d:ar,fill:'var(--s5)','fill-opacity':.1}));
+  svg.appendChild(el('path',{d:dd,fill:'none',stroke:'var(--s5)','stroke-width':2.2,'stroke-linejoin':'round'}));
+  m.forEach((d,i)=>svg.appendChild(el('circle',{cx:xC(i),cy:yRo(d.roas),r:2.6,fill:'var(--s5)'})));
+  // labels for line band
+  const lax=el('text',{x:mL-8,y:lineTop+4,'text-anchor':'end',class:'axis'});lax.setAttribute('fill','var(--s5)');lax.textContent=maxR.toFixed(0)+'x';svg.appendChild(lax);
+  const lab2=el('text',{x:mL,y:splitY+2,class:'axis'});lab2.setAttribute('fill','var(--muted)');lab2.style.fontSize='10px';lab2.textContent='ROAS';svg.appendChild(lab2);
+  document.getElementById('ch-ret-month').appendChild(svg);
+})();
+
+/* ===== CH3 segment bars ===== */
+(function(){
+  const seg=D.retention.bysegment.slice().sort((a,b)=>b.rev-a.rev);
+  const W=560,rowH=64,mT=8,mL=8,mR=16,mB=8;
+  const H=mT+seg.length*rowH+mB;
+  const barX=8,barW=W-140;
+  const maxRev=Math.max(...seg.map(d=>d.rev));
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  const colors=['var(--s1)','var(--s2)','var(--s3)'];
+  seg.forEach((d,i)=>{
+    const y=mT+i*rowH;
+    const lab=el('text',{x:barX,y:y+16,class:'blab'});lab.textContent=d.segment;svg.appendChild(lab);
+    const w=Math.max(barW*d.rev/maxRev,3);
+    const r=el('rect',{x:barX,y:y+24,width:w,height:20,rx:4,fill:colors[i%3],class:'hoverable'});
+    r.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.segment}</div>매출 <b>${won(d.rev)}억</b> · ROAS <b>${d.roas.toFixed(1)}x</b><br>주문 <b>${comma(d.orders)}건</b> · 발송 <b>${d.n}회</b>`,e.clientX,e.clientY));
+    r.addEventListener('mouseleave',hideTT);
+    svg.appendChild(r);
+    const v=el('text',{x:barX+w+8,y:y+39,class:'blab'});v.textContent=won(d.rev)+'억';svg.appendChild(v);
+    const v2=el('text',{x:W-mR,y:y+16,'text-anchor':'end',class:'blab-2'});v2.textContent='ROAS '+d.roas.toFixed(1)+'x';svg.appendChild(v2);
+  });
+  document.getElementById('ch-ret-seg').appendChild(svg);
+  // seg table
+  const defs={'미구매(6개월 미구매)':'6개월 내 미구매 고객','다건구매':'6개월 내 2건 이상 구매','단건구매':'6개월 내 1건 구매'};
+  let rows=seg.map(d=>`<tr><td class="l"><b>${d.segment.replace('(6개월 미구매)','')}</b><br><span style="color:var(--muted);font-size:11px">${defs[d.segment]||''}</span></td>
+    <td class="num roas-good">${d.roas.toFixed(1)}x</td><td class="num">${won(d.rev)}억</td><td class="num">${d.n}회</td></tr>`).join('');
+  document.getElementById('tbl-seg').innerHTML=
+    `<thead><tr><th class="l">세그먼트</th><th>ROAS</th><th>기여 매출</th><th>발송</th></tr></thead><tbody>${rows}</tbody>`;
+})();
+
+/* ===== CH4 campaign type bars ===== */
+(function(){
+  const t=D.campaign.bytype.slice().sort((a,b)=>b.rev-a.rev);
+  const W=560,rowH=52,mT=8,mR=16;
+  const H=mT+t.length*rowH+8;
+  const barX=8,barW=W-150;
+  const maxRev=Math.max(...t.map(d=>d.rev));
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  const pal=['var(--s1)','var(--s2)','var(--s3)','var(--s5)','var(--s8)','var(--s7)'];
+  t.forEach((d,i)=>{
+    const y=mT+i*rowH;
+    const lab=el('text',{x:barX,y:y+14,class:'blab'});lab.textContent=d.type;svg.appendChild(lab);
+    const nlab=el('text',{x:barX,y:y+14,class:'blab-2','text-anchor':'start'});
+    const w=Math.max(barW*d.rev/maxRev,3);
+    const r=el('rect',{x:barX,y:y+20,width:w,height:18,rx:4,fill:pal[i%6],class:'hoverable'});
+    r.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.type}</div>매출 <b>${won(d.rev)}억</b> · 평균 ROAS <b>${d.roas.toFixed(1)}x</b><br>발송 <b>${d.n}건</b> · 구매 <b>${comma(d.buyers)}명</b>`,e.clientX,e.clientY));
+    r.addEventListener('mouseleave',hideTT);
+    svg.appendChild(r);
+    const v=el('text',{x:barX+w+8,y:y+34,class:'blab'});v.textContent=(d.rev/1e6).toFixed(0)+'백만';svg.appendChild(v);
+    const v2=el('text',{x:W-mR,y:y+14,'text-anchor':'end',class:'blab'});v2.setAttribute('fill','var(--good)');v2.textContent=d.roas.toFixed(0)+'x';svg.appendChild(v2);
+    const v3=el('text',{x:W-mR,y:y+34,'text-anchor':'end',class:'blab-2'});v3.textContent=d.n+'건';svg.appendChild(v3);
+  });
+  document.getElementById('ch-cp-type').appendChild(svg);
+})();
+
+/* ===== CH4 scatter CTR vs ROAS ===== */
+(function(){
+  const s=D.campaign.scatter.filter(d=>d.CTR!=null&&d.ROAS!=null);
+  const types=[...new Set(s.map(d=>d.type))];
+  const pal={'라이브 재방송':'var(--s1)','라이브 알림/본방':'var(--s2)','영컨템(3BPU)':'var(--s3)','아울렛(2BPU)':'var(--s5)','프리미엄(1BPU)':'var(--s8)','기타 프로모션':'var(--s7)'};
+  const W=560,H=360,mL=44,mR=14,mT=14,mB=42;
+  const iw=W-mL-mR,ih=H-mT-mB;
+  const maxCtr=Math.max(...s.map(d=>d.CTR))*1.08;
+  const maxRoas=Math.min(Math.max(...s.map(d=>d.ROAS))*1.05,200);
+  const maxRev=Math.max(...s.map(d=>d.rev));
+  const x=v=>mL+iw*v/maxCtr, y=v=>mT+ih*(1-Math.min(v,maxRoas)/maxRoas);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img'});
+  const g=el('g',{class:'grid'});
+  for(let t=0;t<=4;t++){const yy=mT+ih*t/4;g.appendChild(el('line',{x1:mL,y1:yy,x2:W-mR,y2:yy}));}
+  svg.appendChild(g);
+  const ax=el('g',{class:'axis'});
+  for(let t=0;t<=4;t++){const yy=mT+ih*t/4;const val=maxRoas*(1-t/4);const tx=el('text',{x:mL-7,y:yy+3,'text-anchor':'end'});tx.textContent=val.toFixed(0)+'x';ax.appendChild(tx);}
+  for(let t=0;t<=4;t++){const xx=mL+iw*t/4;const val=maxCtr*t/4*100;const tx=el('text',{x:xx,y:H-mB+18,'text-anchor':'middle'});tx.textContent=val.toFixed(0)+'%';ax.appendChild(tx);}
+  const xl=el('text',{x:mL+iw/2,y:H-6,'text-anchor':'middle'});xl.setAttribute('fill','var(--muted)');xl.style.fontSize='10.5px';xl.textContent='클릭률 (CTR) →';ax.appendChild(xl);
+  svg.appendChild(ax);
+  s.sort((a,b)=>b.rev-a.rev).forEach(d=>{
+    const r=4+9*Math.sqrt(d.rev/maxRev);
+    const c=el('circle',{cx:x(d.CTR),cy:y(d.ROAS),r:r,fill:pal[d.type]||'var(--s7)','fill-opacity':.62,stroke:cvar('--surface-1'),'stroke-width':1.4,class:'hoverable'});
+    c.addEventListener('mousemove',e=>showTT(`<div class="tt-t">${d.name}</div>${d.type}<br>CTR <b>${(d.CTR*100).toFixed(2)}%</b> · ROAS <b>${d.ROAS.toFixed(1)}x</b> · 매출 <b>${won(d.rev)}억</b>`,e.clientX,e.clientY));
+    c.addEventListener('mouseleave',hideTT);
+    svg.appendChild(c);
+  });
+  document.getElementById('ch-cp-scatter').appendChild(svg);
+  document.getElementById('cp-legend').innerHTML=types.map(t=>
+    `<span class="li"><span class="sw" style="background:${pal[t]||'var(--s7)'}"></span>${t}</span>`).join('');
+})();
+
+/* ===== CH4 top table ===== */
+(function(){
+  const t=D.campaign.top;
+  let rows=t.map(d=>`<tr><td class="l">${d['발송일']} · ${d.name.replace(/^MKT_/,'')}</td>
+    <td class="l"><span class="pill">${d.type}</span></td>
+    <td class="num">${won(d.rev)}억</td>
+    <td class="num roas-good">${d.ROAS.toFixed(1)}x</td>
+    <td class="num">${(d.CTR*100).toFixed(1)}%</td></tr>`).join('');
+  document.getElementById('tbl-top').innerHTML=
+   `<thead><tr><th class="l">발송일 · 캠페인</th><th class="l">유형</th><th>매출</th><th>ROAS</th><th>CTR</th></tr></thead><tbody>${rows}</tbody>`;
+})();
+</script>
