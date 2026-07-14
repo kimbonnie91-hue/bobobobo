@@ -62,6 +62,12 @@ function onOpen() {
     .addItem('표시 지우기(선택 영역)', 'clearSelectionMarks')
     .addItem('표시 지우기(현재 시트 전체)', 'clearSheetMarks')
     .addToUi();
+
+  SpreadsheetApp.getUi()
+    .createMenu('🔁 AF코드 중복')
+    .addItem('전체 중복 검사(모든 주차 탭)', 'checkAllAfDuplicates')
+    .addItem('AF 중복 표시 지우기(현재 시트)', 'clearAfMarksSheet')
+    .addToUi();
 }
 
 
@@ -399,4 +405,220 @@ function decodeEntities(s) {
     .replace(/&#(\d+);/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); })
     .replace(/&#x([0-9a-fA-F]+);/g, function (_, n) { return String.fromCharCode(parseInt(n, 16)); })
     .replace(/&amp;/g, '&');
+}
+
+
+/* ============================================================================
+ *  AF코드 중복 검사 (요일·주차·마케팅/영업 전체를 가로질러 중복 방지)
+ * ============================================================================
+ *
+ *  - 주차 탭(이름에 '주차' 포함)의 'AF코드' 열에 코드를 입력/붙여넣는 순간,
+ *    모든 주차 탭을 스캔해 같은 코드가 이미 쓰였으면 즉시 팝업 + 셀 메모로 경고.
+ *  - 마스터 풀(PUSH AF코드(마케팅)) 목록에 없는 코드(오타 의심)도 경고.
+ *  - 아래 상수로 동작을 조정할 수 있습니다.
+ * ------------------------------------------------------------------------- */
+
+var AFCODE_HEADER = 'AF코드';               // 주차 탭에서 이 헤더가 있는 열을 검사
+var WEEKLY_TAB_PATTERN = '주차';            // 이 문자열이 든 탭을 '주차 탭'으로 취급
+var MASTER_TAB = 'PUSH AF코드(마케팅)';      // 마스터 풀 탭 이름
+var AFCODE_PATTERN = /^[A-Z]{2,4}\d{2,4}$/; // AF코드 형태(AP02, PB15, APZ01, AP300...)
+
+var CHECK_MASTER_MEMBERSHIP = true; // 마스터 풀에 없는 코드도 경고할지 (영업 코드가 다른 풀이면 false)
+var AF_USE_BG = true;               // 셀 배경 강조 사용 (AF코드 열에 기존 수동 채우기색이 있으면 false 권장)
+
+var AF_NOTE_TAG = '[AF중복]';
+var AF_ERR_BG  = '#F4CCCC'; // 중복(빨강)
+var AF_WARN_BG = '#FCE5CD'; // 마스터풀에 없음(주황)
+
+
+/** 편집 시 실시간 AF코드 중복 검사 (설치형 트리거 불필요, 단순 트리거) */
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    var sh = e.range.getSheet();
+    var name = sh.getName();
+    if (name.indexOf(WEEKLY_TAB_PATTERN) === -1) return; // 주차 탭만
+
+    var afCol = findAfCol(sh);
+    if (afCol === -1) return;
+
+    var c0 = e.range.getColumn();
+    var nC = e.range.getNumColumns();
+    if (afCol < c0 || afCol > c0 + nC - 1) return; // AF코드 열 편집 아님
+
+    var ss = sh.getParent();
+    var index = buildWeeklyIndex(ss);   // 코드 -> ['탭!행', ...]
+    var master = CHECK_MASTER_MEMBERSHIP ? getMasterCodeSet(ss) : null;
+
+    var r0 = e.range.getRow();
+    var nR = e.range.getNumRows();
+    var alerts = [];
+
+    for (var r = r0; r < r0 + nR; r++) {
+      var cell = sh.getRange(r, afCol);
+      var val = String(cell.getValue()).trim();
+
+      if (val === '' || !AFCODE_PATTERN.test(val)) {
+        clearAfCell(cell);
+        continue;
+      }
+
+      var here = name + '!' + r;
+      var others = (index[val] || []).filter(function (p) { return p !== here; });
+
+      if (others.length > 0) {
+        markAfCell(cell, AF_ERR_BG, AF_NOTE_TAG + ' 중복! 이미 사용: ' + others.join(', '));
+        alerts.push('⚠️ ' + val + ' 중복 → ' + others.join(', '));
+      } else if (master && master.size > 0 && !master.has(val)) {
+        markAfCell(cell, AF_WARN_BG, AF_NOTE_TAG + ' 마스터 풀에 없는 코드(오타 의심)');
+        alerts.push('❓ ' + val + ' : 마스터 풀에 없음');
+      } else {
+        clearAfCell(cell);
+      }
+    }
+
+    if (alerts.length > 0) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(alerts.join('\n'), 'AF코드 경고', 8);
+    }
+  } catch (err) {
+    // onEdit는 조용히 실패해야 시트 편집을 방해하지 않음
+  }
+}
+
+
+/** 모든 주차 탭을 스캔해 기존 중복을 한번에 표시 (초기 점검용) */
+function checkAllAfDuplicates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var index = buildWeeklyIndex(ss);
+  var master = CHECK_MASTER_MEMBERSHIP ? getMasterCodeSet(ss) : null;
+
+  var dupCodes = [];
+  for (var code in index) {
+    if (index[code].length > 1) dupCodes.push(code);
+  }
+
+  // 표시 갱신: 주차 탭들의 AF코드 열을 다시 훑어 마킹/해제
+  var sheets = ss.getSheets();
+  var totalDupCells = 0;
+
+  for (var s = 0; s < sheets.length; s++) {
+    var sh = sheets[s];
+    if (sh.getName().indexOf(WEEKLY_TAB_PATTERN) === -1) continue;
+    var col = findAfCol(sh);
+    if (col === -1) continue;
+    var last = sh.getLastRow();
+    if (last < 1) continue;
+
+    var rng = sh.getRange(1, col, last, 1);
+    var vals = rng.getValues();
+
+    for (var i = 0; i < vals.length; i++) {
+      var v = String(vals[i][0]).trim();
+      var cell = sh.getRange(i + 1, col);
+      if (v === '' || !AFCODE_PATTERN.test(v)) { clearAfCell(cell); continue; }
+
+      if (index[v] && index[v].length > 1) {
+        var others = index[v].filter(function (p) { return p !== (sh.getName() + '!' + (i + 1)); });
+        markAfCell(cell, AF_ERR_BG, AF_NOTE_TAG + ' 중복! 사용처: ' + index[v].join(', '));
+        totalDupCells++;
+      } else if (master && master.size > 0 && !master.has(v)) {
+        markAfCell(cell, AF_WARN_BG, AF_NOTE_TAG + ' 마스터 풀에 없는 코드(오타 의심)');
+      } else {
+        clearAfCell(cell);
+      }
+    }
+  }
+
+  var msg = dupCodes.length === 0
+    ? '중복 없음 ✅'
+    : '중복 코드 ' + dupCodes.length + '종 / 셀 ' + totalDupCells + '개:\n' + dupCodes.join(', ');
+  SpreadsheetApp.getUi().alert('AF코드 중복 검사 결과', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+/** 현재 시트에서 AF 중복 표시 제거 */
+function clearAfMarksSheet() {
+  var sh = SpreadsheetApp.getActiveSheet();
+  var col = findAfCol(sh);
+  if (col === -1) {
+    SpreadsheetApp.getActiveSpreadsheet().toast('이 시트에서 AF코드 열을 못 찾음', 'AF코드', 4);
+    return;
+  }
+  var last = sh.getLastRow();
+  if (last < 1) return;
+  for (var i = 1; i <= last; i++) clearAfCell(sh.getRange(i, col));
+  SpreadsheetApp.getActiveSpreadsheet().toast('AF 중복 표시 제거 완료', 'AF코드', 4);
+}
+
+
+/** 주차 탭 전체의 AF코드 인덱스: 코드 -> ['탭명!행', ...] */
+function buildWeeklyIndex(ss) {
+  var index = {};
+  var sheets = ss.getSheets();
+  for (var s = 0; s < sheets.length; s++) {
+    var sh = sheets[s];
+    var nm = sh.getName();
+    if (nm.indexOf(WEEKLY_TAB_PATTERN) === -1) continue;
+    var col = findAfCol(sh);
+    if (col === -1) continue;
+    var last = sh.getLastRow();
+    if (last < 1) continue;
+    var vals = sh.getRange(1, col, last, 1).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      var v = String(vals[i][0]).trim();
+      if (v === '' || !AFCODE_PATTERN.test(v)) continue;
+      var pos = nm + '!' + (i + 1);
+      (index[v] = index[v] || []).push(pos);
+    }
+  }
+  return index;
+}
+
+
+/** 마스터 풀 탭에서 AF코드 집합 추출 (셀 안에 섞여 있어도 코드만 뽑음) */
+function getMasterCodeSet(ss) {
+  var set = new Set();
+  var sh = ss.getSheetByName(MASTER_TAB);
+  if (!sh) return set;
+  var last = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (last < 1 || lastCol < 1) return set;
+  var vals = sh.getRange(1, 1, last, lastCol).getValues();
+  var re = /[A-Z]{2,4}\d{2,4}/g;
+  for (var r = 0; r < vals.length; r++) {
+    for (var c = 0; c < vals[r].length; c++) {
+      var cellStr = String(vals[r][c] == null ? '' : vals[r][c]);
+      var m;
+      while ((m = re.exec(cellStr)) !== null) set.add(m[0]);
+    }
+  }
+  return set;
+}
+
+
+/** 시트에서 'AF코드' 헤더가 있는 열 번호 찾기 (없으면 -1) */
+function findAfCol(sh) {
+  var finder = sh.createTextFinder(AFCODE_HEADER).matchEntireCell(true);
+  var found = finder.findNext();
+  return found ? found.getColumn() : -1;
+}
+
+
+/** 셀에 AF 경고 표시 (기존 값/서식은 최대한 보존) */
+function markAfCell(cell, bg, note) {
+  cell.setNote(note);
+  if (AF_USE_BG) cell.setBackground(bg);
+}
+
+
+/** 우리가 남긴 AF 경고 표시만 제거 (사용자 원래 서식/메모는 유지) */
+function clearAfCell(cell) {
+  var note = cell.getNote();
+  if (note && note.indexOf(AF_NOTE_TAG) === 0) cell.setNote('');
+  if (AF_USE_BG) {
+    var bg = (cell.getBackground() || '').toUpperCase();
+    if (bg === AF_ERR_BG.toUpperCase() || bg === AF_WARN_BG.toUpperCase()) {
+      cell.setBackground(null);
+    }
+  }
 }
