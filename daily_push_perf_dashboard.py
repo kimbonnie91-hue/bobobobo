@@ -1005,6 +1005,7 @@ RATE_LABELS = {"ctr": "CTR(UV/발송)", "cvr": "주문전환율(주문/UV)", "rp
 def main():
     import streamlit as st
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
     st.set_page_config(page_title="일일 PUSH 발송성과 대시보드", layout="wide", initial_sidebar_state="expanded")
     st.markdown("""
@@ -1441,20 +1442,28 @@ def main():
         c7.metric("RPS(발송당거래액)", f"{(amt_t/send_t if send_t else 0):,.0f}")
 
         st.markdown("---")
+        st.markdown("#### 추이 지표 — 한눈에 보기")
         TREND_METRIC_LABELS = {**METRIC_LABELS, "ctr": "CTR(UV/발송)", "cvr": "CR(주문/UV)"}
-        metric = st.selectbox("추이 지표", list(TREND_METRIC_LABELS), format_func=lambda k: TREND_METRIC_LABELS[k],
-                              key="sum_metric")
         weekly = f.groupby(["week_start", "week_label"], dropna=False).agg(
             send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
         weekly = weekly.sort_values("week_start")
         weekly["ctr"] = np.where(weekly["send"] > 0, weekly["uv"] / weekly["send"], np.nan)
         weekly["cvr"] = np.where(weekly["uv"] > 0, weekly["oc"] / weekly["uv"], np.nan)
-        fig = go.Figure(go.Scatter(x=weekly["week_label"], y=weekly[metric], mode="lines+markers",
-                                   line=dict(color="#4f8fff", width=2)))
-        layout_kwargs = base_layout(title=f"주차별 {TREND_METRIC_LABELS[metric]} 추이")
-        if metric in ("ctr", "cvr"):
-            layout_kwargs["yaxis"]["tickformat"] = ".1%"
-        fig.update_layout(**layout_kwargs)
+
+        grid_metrics = list(TREND_METRIC_LABELS)
+        fig = make_subplots(rows=2, cols=3, subplot_titles=[TREND_METRIC_LABELS[m] for m in grid_metrics])
+        for i, m in enumerate(grid_metrics):
+            r, c = i // 3 + 1, i % 3 + 1
+            fig.add_trace(go.Scatter(x=weekly["week_label"], y=weekly[m], mode="lines+markers",
+                                     line=dict(color="#4f8fff", width=2), showlegend=False), row=r, col=c)
+            if m in ("ctr", "cvr"):
+                fig.update_yaxes(tickformat=".1%", row=r, col=c)
+        fig.update_layout(height=520, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                          font=dict(color="#475569", size=11), margin=dict(l=10, r=10, t=40, b=10))
+        fig.update_xaxes(gridcolor="rgba(0,0,0,0)", linecolor="#e2e8f0")
+        fig.update_yaxes(gridcolor="#f1f5f9", linecolor="#e2e8f0")
+        for ann in fig["layout"]["annotations"]:
+            ann["font"] = dict(color="#94a3b8", size=13)
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 전주 대비")
