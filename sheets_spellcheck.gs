@@ -47,6 +47,9 @@ var OK_BG  = null;      // 정상 셀은 배경 초기화(원래대로)
 // 이 스크립트가 남긴 메모임을 표시하는 접두어(표시 지우기 때 이 메모만 제거).
 var NOTE_TAG = '[맞춤법]';
 
+// 사용자 사전(브랜드 오타 등) 탭 이름. [틀린표현 | 올바른표현 | 메모]
+var DICT_SHEET = '맞춤법사전';
+
 
 /** 스프레드시트 열릴 때 메뉴 생성 */
 function onOpen() {
@@ -54,9 +57,74 @@ function onOpen() {
     .createMenu('🔤 맞춤법 검사')
     .addItem('선택 영역 검사', 'checkSelection')
     .addSeparator()
+    .addItem('사용자 사전 만들기/열기', 'openDict')
+    .addSeparator()
     .addItem('표시 지우기(선택 영역)', 'clearSelectionMarks')
     .addItem('표시 지우기(현재 시트 전체)', 'clearSheetMarks')
     .addToUi();
+}
+
+
+/** 사용자 사전 탭을 만들거나(없으면) 열기 */
+function openDict() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(DICT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(DICT_SHEET);
+    sh.getRange('A1:C1')
+      .setValues([['틀린표현', '올바른표현', '메모']])
+      .setFontWeight('bold').setBackground('#FFF2CC');
+    sh.getRange('A2:C4').setValues([
+      ['카즈', '카츠', '브랜드명'],
+      ['썸머', '서머', '외래어 표기'],
+      ['오르뜨', '오르뜨', '(예시 - 삭제하고 실제 규칙 입력)']
+    ]);
+    sh.setFrozenRows(1);
+    sh.setColumnWidths(1, 3, 160);
+  }
+  ss.setActiveSheet(sh);
+  ss.toast('사용자 사전 탭입니다. 틀린표현/올바른표현/메모를 채우세요.', '맞춤법 검사', 6);
+}
+
+
+/** 사용자 사전 규칙 로드 → [{find, to, note}] */
+function loadCustomRules() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DICT_SHEET);
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var rows = sh.getRange(2, 1, last - 1, 3).getValues();
+  var rules = [];
+  for (var i = 0; i < rows.length; i++) {
+    var find = String(rows[i][0] == null ? '' : rows[i][0]).trim();
+    if (find === '') continue;
+    rules.push({
+      find: find,
+      to: String(rows[i][1] == null ? '' : rows[i][1]).trim(),
+      note: String(rows[i][2] == null ? '' : rows[i][2]).trim()
+    });
+  }
+  return rules;
+}
+
+
+/** 원문에서 사용자 사전 규칙에 걸리는 표현 찾기 → [{orgStr, candWord, help}] */
+function applyCustomRules(rawText, rules) {
+  var out = [];
+  if (!rules || rules.length === 0) return out;
+  var text = String(rawText);
+  for (var i = 0; i < rules.length; i++) {
+    var r = rules[i];
+    if (text.indexOf(r.find) === -1) continue;
+    // 틀린표현==올바른표현 이면 알림용 예시이므로 건너뜀
+    if (r.to && r.to === r.find) continue;
+    out.push({
+      orgStr: r.find,
+      candWord: r.to || '',
+      help: (r.note ? r.note + ' ' : '') + '(사용자 사전)'
+    });
+  }
+  return out;
 }
 
 
@@ -83,6 +151,8 @@ function checkSelection() {
   var bgs   = range.getBackgrounds();
   var notes = range.getNotes();
 
+  var rules = loadCustomRules(); // 사용자 사전(브랜드 오타 등)
+
   var errCells = 0;
   var checked = 0;
 
@@ -106,9 +176,12 @@ function checkSelection() {
         continue;
       }
 
-      if (result.errors.length > 0) {
+      // 다음 검사기 결과 + 사용자 사전 결과 병합
+      var allErrors = result.errors.concat(applyCustomRules(String(text), rules));
+
+      if (allErrors.length > 0) {
         bgs[r][c] = ERR_BG;
-        notes[r][c] = buildNote(result.errors);
+        notes[r][c] = buildNote(allErrors);
         errCells++;
       } else {
         // 오류 없음: 이 스크립트가 남긴 흔적만 정리(사용자 원래 서식/메모는 유지)
