@@ -69,6 +69,7 @@ function onOpen() {
     .addItem('AF 중복 표시 지우기(현재 시트)', 'clearAfMarksSheet')
     .addSeparator()
     .addItem('🔧 진단(왜 경고가 안 뜨나)', 'afDiag')
+    .addItem('캐시 초기화(열/마스터 변경 후)', 'clearAfCache')
     .addToUi();
 }
 
@@ -426,7 +427,7 @@ var WEEKLY_TAB_PATTERN = '주차';            // 이 문자열이 든 탭을 '�
 var MASTER_TAB = 'PUSH AF코드(마케팅)';      // 마스터 풀 탭 이름
 var AFCODE_PATTERN = /^[A-Z]{2,4}\d{2,4}$/; // AF코드 형태(AP02, PB15, APZ01, AP300...)
 
-var CHECK_MASTER_MEMBERSHIP = true; // 마스터 풀에 없는 코드도 경고할지 (영업 코드가 다른 풀이면 false)
+var CHECK_MASTER_MEMBERSHIP = false; // 마스터 풀 대조(오타 경고). 실시간 속도 위해 기본 OFF. 켜면 캐시로 동작
 var AF_USE_BG = true;               // 셀 배경 강조 사용 (AF코드 열에 기존 수동 채우기색이 있으면 false 권장)
 
 var AF_NOTE_TAG = '[AF중복]';
@@ -442,7 +443,7 @@ function onEdit(e) {
     var name = sh.getName();
     if (name.indexOf(WEEKLY_TAB_PATTERN) === -1) return; // 주차 탭만
 
-    var afCol = findAfCol(sh);
+    var afCol = getAfColCached(sh); // 캐시된 열 번호 (TextFinder 반복 방지)
     if (afCol === -1) return;
 
     var c0 = e.range.getColumn();
@@ -450,8 +451,14 @@ function onEdit(e) {
     if (afCol < c0 || afCol > c0 + nC - 1) return; // AF코드 열 편집 아님
 
     var ss = sh.getParent();
-    var index = buildSheetIndex(sh);   // 이 주차 탭 안에서만: 코드 -> [행, ...]
-    var master = CHECK_MASTER_MEMBERSHIP ? getMasterCodeSet(ss) : null;
+    var last = sh.getLastRow();
+    var colVals = sh.getRange(1, afCol, last, 1).getValues(); // AF열 1회만 읽기
+    var index = {};
+    for (var k = 0; k < colVals.length; k++) {
+      var cv = String(colVals[k][0]).trim();
+      if (cv && AFCODE_PATTERN.test(cv)) (index[cv] = index[cv] || []).push(k + 1);
+    }
+    var master = CHECK_MASTER_MEMBERSHIP ? getMasterCodeSetCached(ss) : null;
 
     var r0 = e.range.getRow();
     var nR = e.range.getNumRows();
@@ -464,7 +471,7 @@ function onEdit(e) {
       if (seen[rr]) continue;
       seen[rr] = true;
 
-      var val = String(cell.getValue()).trim();
+      var val = String((colVals[rr - 1] || [''])[0]).trim(); // 위에서 읽은 값 재사용
 
       if (val === '' || !AFCODE_PATTERN.test(val)) {
         clearAfCell(cell);
@@ -592,6 +599,43 @@ function getMasterCodeSet(ss) {
     }
   }
   return set;
+}
+
+
+/** AF코드 열 번호를 캐시 (시트별 6시간). TextFinder 반복 비용 제거 */
+function getAfColCached(sh) {
+  var cache = CacheService.getScriptCache();
+  var key = 'afcol_' + sh.getSheetId();
+  var v = cache.get(key);
+  if (v !== null) return parseInt(v, 10);
+  var col = findAfCol(sh);
+  cache.put(key, String(col), 21600);
+  return col;
+}
+
+
+/** 마스터 풀 코드 집합을 캐시 (1시간). 마스터 그리드 전체 읽기 반복 제거 */
+function getMasterCodeSetCached(ss) {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('masterset');
+  if (cached) {
+    try { return new Set(JSON.parse(cached)); } catch (e) { /* 무시하고 재생성 */ }
+  }
+  var set = getMasterCodeSet(ss);
+  try { cache.put('masterset', JSON.stringify(Array.from(set)), 3600); } catch (e) { /* 용량 초과 시 무시 */ }
+  return set;
+}
+
+
+/** 캐시 초기화 (AF열/마스터 풀 변경 후 사용) */
+function clearAfCache() {
+  var cache = CacheService.getScriptCache();
+  cache.remove('masterset');
+  var sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  var keys = [];
+  for (var i = 0; i < sheets.length; i++) keys.push('afcol_' + sheets[i].getSheetId());
+  cache.removeAll(keys);
+  SpreadsheetApp.getActiveSpreadsheet().toast('캐시 초기화 완료', 'AF코드', 4);
 }
 
 
