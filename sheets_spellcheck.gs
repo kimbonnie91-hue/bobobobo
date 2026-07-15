@@ -427,6 +427,7 @@ var WEEKLY_TAB_PATTERN = '주차';            // 이 문자열이 든 탭을 '�
 var MASTER_TAB = 'PUSH AF코드(마케팅)';      // 마스터 풀 탭 이름
 var AFCODE_PATTERN = /^[A-Z]{2,4}\d{2,4}$/; // AF코드 형태(AP02, PB15, APZ01, AP300...)
 
+var ONLY_WEEKLY_TABS = false;        // true면 '주차' 든 탭만 검사, false면 AF코드 열 있는 모든 탭 검사(권장)
 var CHECK_MASTER_MEMBERSHIP = false; // 마스터 풀 대조(오타 경고). 실시간 속도 위해 기본 OFF. 켜면 캐시로 동작
 var AF_USE_BG = true;               // 셀 배경 강조 사용 (AF코드 열에 기존 수동 채우기색이 있으면 false 권장)
 
@@ -441,10 +442,10 @@ function onEdit(e) {
     if (!e || !e.range) return;
     var sh = e.range.getSheet();
     var name = sh.getName();
-    if (name.indexOf(WEEKLY_TAB_PATTERN) === -1) return; // 주차 탭만
+    if (ONLY_WEEKLY_TABS && name.indexOf(WEEKLY_TAB_PATTERN) === -1) return;
 
     var afCol = getAfColCached(sh); // 캐시된 열 번호 (TextFinder 반복 방지)
-    if (afCol === -1) return;
+    if (afCol === -1) return; // AF코드 열 없는 탭이면 검사 안 함
 
     var c0 = e.range.getColumn();
     var nC = e.range.getNumColumns();
@@ -525,9 +526,9 @@ function checkAllAfDuplicates() {
   for (var s = 0; s < sheets.length; s++) {
     var sh = sheets[s];
     var nm = sh.getName();
-    if (nm.indexOf(WEEKLY_TAB_PATTERN) === -1) continue;
+    if (ONLY_WEEKLY_TABS && nm.indexOf(WEEKLY_TAB_PATTERN) === -1) continue;
     var col = findAfCol(sh);
-    if (col === -1) continue;
+    if (col === -1) continue; // AF코드 열 있는 탭만
     var last = sh.getLastRow();
     if (last < 1) continue;
 
@@ -615,28 +616,34 @@ function getMasterCodeSet(ss) {
 }
 
 
-/** AF코드 열 번호를 캐시 (시트별 6시간). TextFinder 반복 비용 제거 */
+/** AF코드 열 번호를 캐시 (시트별 6시간). 캐시 실패해도 정상 동작(직접 탐색) */
 function getAfColCached(sh) {
-  var cache = CacheService.getScriptCache();
-  var key = 'afcol_' + sh.getSheetId();
-  var v = cache.get(key);
-  if (v !== null) return parseInt(v, 10);
-  var col = findAfCol(sh);
-  cache.put(key, String(col), 21600);
-  return col;
+  try {
+    var cache = CacheService.getScriptCache();
+    var key = 'afcol_' + sh.getSheetId();
+    var v = cache.get(key);
+    if (v !== null) return parseInt(v, 10);
+    var col = findAfCol(sh);
+    cache.put(key, String(col), 21600);
+    return col;
+  } catch (e) {
+    return findAfCol(sh); // 실시간 트리거 제한 권한 등에서 캐시 실패 시 폴백
+  }
 }
 
 
-/** 마스터 풀 코드 집합을 캐시 (1시간). 마스터 그리드 전체 읽기 반복 제거 */
+/** 마스터 풀 코드 집합을 캐시 (1시간). 캐시 실패해도 정상 동작 */
 function getMasterCodeSetCached(ss) {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('masterset');
-  if (cached) {
-    try { return new Set(JSON.parse(cached)); } catch (e) { /* 무시하고 재생성 */ }
+  try {
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get('masterset');
+    if (cached) return new Set(JSON.parse(cached));
+    var set = getMasterCodeSet(ss);
+    cache.put('masterset', JSON.stringify(Array.from(set)), 3600);
+    return set;
+  } catch (e) {
+    return getMasterCodeSet(ss);
   }
-  var set = getMasterCodeSet(ss);
-  try { cache.put('masterset', JSON.stringify(Array.from(set)), 3600); } catch (e) { /* 용량 초과 시 무시 */ }
-  return set;
 }
 
 
@@ -668,12 +675,13 @@ function findAfCol(sh) {
 function afDiag() {
   var sh = SpreadsheetApp.getActiveSheet();
   var name = sh.getName();
-  var isWeekly = name.indexOf(WEEKLY_TAB_PATTERN) !== -1;
   var col = findAfCol(sh);
+  var nameOk = !ONLY_WEEKLY_TABS || name.indexOf(WEEKLY_TAB_PATTERN) !== -1;
+  var willRun = nameOk && col !== -1;
 
   var msg = '탭 이름: "' + name + '"\n'
-    + "· '" + WEEKLY_TAB_PATTERN + "' 포함(검사 대상): "
-    + (isWeekly ? '예 ✅' : '아니오 ❌  ← 이래서 경고가 안 뜹니다') + '\n'
+    + '· 실시간 검사 동작?: ' + (willRun ? '예 ✅' : '아니오 ❌') + '\n'
+    + (ONLY_WEEKLY_TABS ? ("· '" + WEEKLY_TAB_PATTERN + "' 포함: " + (name.indexOf(WEEKLY_TAB_PATTERN) !== -1 ? '예' : '아니오 ← ONLY_WEEKLY_TABS=false로 두면 해결') + '\n') : '')
     + '· AF코드 열: '
     + (col === -1 ? '못 찾음 ❌  ← 헤더가 정확히 "AF코드"인지 확인' : col + '열 (' + colLetter(col) + ') ✅') + '\n';
 
