@@ -431,7 +431,7 @@ var CHECK_MASTER_MEMBERSHIP = false; // 마스터 풀 대조(오타 경고). 실
 var AF_USE_BG = true;               // 셀 배경 강조 사용 (AF코드 열에 기존 수동 채우기색이 있으면 false 권장)
 
 var AF_NOTE_TAG = '[AF중복]';
-var AF_ERR_BG  = '#F4CCCC'; // 중복(빨강)
+var AF_ERR_BG  = '#FF4D4D'; // 중복(또렷한 빨강)
 var AF_WARN_BG = '#FCE5CD'; // 마스터풀에 없음(주황)
 
 
@@ -478,16 +478,29 @@ function onEdit(e) {
         continue;
       }
 
-      var others = (index[val] || []).filter(function (row) { return row !== rr; });
+      var allRows = index[val] || [rr];
+      var others = allRows.filter(function (row) { return row !== rr; });
 
       if (others.length > 0) {
-        markAfCell(cell, AF_ERR_BG, AF_NOTE_TAG + ' 이 탭에서 중복! 행 ' + others.join(', '));
+        var note = AF_NOTE_TAG + ' 이 탭에서 중복! 행 ' + allRows.join(', ');
+        markAfCell(cell, AF_ERR_BG, note);
+        for (var oi = 0; oi < others.length; oi++) {
+          markAfCell(anchorCell(sh, others[oi], afCol), AF_ERR_BG, note); // 짝 셀도 빨강
+        }
         alerts.push('⚠️ ' + val + ' 중복 → 같은 탭 행 ' + others.join(', '));
       } else if (master && master.size > 0 && !master.has(val)) {
         markAfCell(cell, AF_WARN_BG, AF_NOTE_TAG + ' 마스터 풀에 없는 코드(오타 의심)');
         alerts.push('❓ ' + val + ' : 마스터 풀에 없음');
       } else {
         clearAfCell(cell);
+      }
+    }
+
+    // 중복을 고쳐서 유일해진 경우, 이전 값(짝)의 빨강도 해제
+    if (e.oldValue !== undefined) {
+      var ov = String(e.oldValue).trim();
+      if (ov && AFCODE_PATTERN.test(ov) && index[ov] && index[ov].length === 1) {
+        clearAfCell(anchorCell(sh, index[ov][0], afCol));
       }
     }
 
