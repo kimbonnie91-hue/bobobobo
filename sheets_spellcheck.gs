@@ -456,9 +456,14 @@ function onEdit(e) {
     var r0 = e.range.getRow();
     var nR = e.range.getNumRows();
     var alerts = [];
+    var seen = {}; // 병합 셀이 여러 행에 걸쳐도 앵커 한 번만 처리
 
     for (var r = r0; r < r0 + nR; r++) {
-      var cell = sh.getRange(r, afCol);
+      var cell = anchorCell(sh, r, afCol); // 병합이면 맨 위 셀
+      var rr = cell.getRow();
+      if (seen[rr]) continue;
+      seen[rr] = true;
+
       var val = String(cell.getValue()).trim();
 
       if (val === '' || !AFCODE_PATTERN.test(val)) {
@@ -466,7 +471,7 @@ function onEdit(e) {
         continue;
       }
 
-      var others = (index[val] || []).filter(function (row) { return row !== r; });
+      var others = (index[val] || []).filter(function (row) { return row !== rr; });
 
       if (others.length > 0) {
         markAfCell(cell, AF_ERR_BG, AF_NOTE_TAG + ' 이 탭에서 중복! 행 ' + others.join(', '));
@@ -622,11 +627,30 @@ function afDiag() {
     for (var c in idx) {
       if (idx[c].length > 1) dups.push(c + ' (행 ' + idx[c].join(',') + ')');
     }
+    // 실제로 읽은 코드 앞부분 샘플
+    var sample = Object.keys(idx).slice(0, 8).join(', ');
+    // 현재 선택 셀의 병합 여부
+    var act = sh.getActiveCell();
+    var merged = act.isPartOfMerge() ? ('예 (앵커 ' + colLetter(anchorCell(sh, act.getRow(), act.getColumn()).getColumn()) + anchorCell(sh, act.getRow(), act.getColumn()).getRow() + ')') : '아니오';
+
     msg += '· 인식된 코드 수: ' + codeCount + '\n'
+        + '· 코드 샘플: ' + (sample || '(없음 ← 읽기 실패)') + '\n'
+        + '· 현재 셀 병합됨? ' + merged + '\n'
         + '· 이 탭 중복: ' + (dups.length ? dups.join(' / ') : '없음');
   }
 
   SpreadsheetApp.getUi().alert('AF코드 진단', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+/** 병합 셀이면 맨 위(앵커) 셀을 반환, 아니면 그 셀 그대로 */
+function anchorCell(sh, row, col) {
+  var cell = sh.getRange(row, col);
+  if (cell.isPartOfMerge()) {
+    var mr = cell.getMergedRanges();
+    if (mr && mr.length) return mr[0].getCell(1, 1);
+  }
+  return cell;
 }
 
 
