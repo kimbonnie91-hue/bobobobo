@@ -1444,17 +1444,26 @@ def main():
         st.markdown("---")
         st.markdown("#### 추이 지표 — 한눈에 보기")
         TREND_METRIC_LABELS = {**METRIC_LABELS, "ctr": "CTR(UV/발송)", "cvr": "CR(주문/UV)"}
-        weekly = f.groupby(["week_start", "week_label"], dropna=False).agg(
-            send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
-        weekly = weekly.sort_values("week_start")
-        weekly["ctr"] = np.where(weekly["send"] > 0, weekly["uv"] / weekly["send"], np.nan)
-        weekly["cvr"] = np.where(weekly["uv"] > 0, weekly["oc"] / weekly["uv"], np.nan)
+        granularity = st.radio("단위", ["주차별", "일자별"], horizontal=True, key="trend_grid_granularity")
+
+        if granularity == "주차별":
+            gdf = f.groupby(["week_start", "week_label"], dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+            gdf = gdf.sort_values("week_start").rename(columns={"week_label": "x"})
+            x_mode = "lines+markers"
+        else:
+            gdf = f.groupby(f["dt"].dt.date, dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index(names="x")
+            gdf = gdf.sort_values("x")
+            x_mode = "lines"
+        gdf["ctr"] = np.where(gdf["send"] > 0, gdf["uv"] / gdf["send"], np.nan)
+        gdf["cvr"] = np.where(gdf["uv"] > 0, gdf["oc"] / gdf["uv"], np.nan)
 
         grid_metrics = list(TREND_METRIC_LABELS)
         fig = make_subplots(rows=2, cols=3, subplot_titles=[TREND_METRIC_LABELS[m] for m in grid_metrics])
         for i, m in enumerate(grid_metrics):
             r, c = i // 3 + 1, i % 3 + 1
-            fig.add_trace(go.Scatter(x=weekly["week_label"], y=weekly[m], mode="lines+markers",
+            fig.add_trace(go.Scatter(x=gdf["x"], y=gdf[m], mode=x_mode,
                                      line=dict(color="#4f8fff", width=2), showlegend=False), row=r, col=c)
             if m in ("ctr", "cvr"):
                 fig.update_yaxes(tickformat=".1%", row=r, col=c)
