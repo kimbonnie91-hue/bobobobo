@@ -65,6 +65,7 @@ function onOpen() {
 
   SpreadsheetApp.getUi()
     .createMenu('🔁 AF코드 중복')
+    .addItem('이 탭 지금 검사', 'scanCurrentSheet')
     .addItem('전체 검사(각 주차 탭 내부)', 'checkAllAfDuplicates')
     .addItem('AF 중복 표시 지우기(현재 시트)', 'clearAfMarksSheet')
     .addSeparator()
@@ -514,6 +515,59 @@ function onEdit(e) {
 }
 
 
+/** 현재 탭만 즉시 검사 (메뉴 실행 = 전체 권한, 실시간이 안 떠도 이걸로 확실히 표시) */
+function scanCurrentSheet() {
+  var sh = SpreadsheetApp.getActiveSheet();
+  var col = findAfCol(sh);
+  if (col === -1) {
+    SpreadsheetApp.getUi().alert('이 탭에서 "AF코드" 열(헤더)을 못 찾았습니다.');
+    return;
+  }
+  var last = sh.getLastRow();
+  if (last < 1) return;
+
+  var index = buildSheetIndex(sh);
+  var master = CHECK_MASTER_MEMBERSHIP ? getMasterCodeSet(sh.getParent()) : null;
+  var skip = getMergeSkip(sh, col, last); // 병합 아래칸(비앵커) 건너뛰기
+  var vals = sh.getRange(1, col, last, 1).getValues();
+
+  var dupCells = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var row = i + 1;
+    if (skip[row]) continue; // 병합 하위칸은 손대지 않음(앵커 배경 유지)
+    var v = String(vals[i][0]).trim();
+    var cell = sh.getRange(row, col);
+    if (v === '' || !AFCODE_PATTERN.test(v)) { clearAfCell(cell); continue; }
+
+    if (index[v] && index[v].length > 1) {
+      markAfCell(cell, AF_ERR_BG, AF_NOTE_TAG + ' 이 탭에서 중복! 행 ' + index[v].join(', '));
+      dupCells++;
+    } else if (master && master.size > 0 && !master.has(v)) {
+      markAfCell(cell, AF_WARN_BG, AF_NOTE_TAG + ' 마스터 풀에 없는 코드(오타 의심)');
+    } else {
+      clearAfCell(cell);
+    }
+  }
+
+  SpreadsheetApp.getUi().alert('이 탭 검사 완료',
+    '중복 셀 ' + dupCells + '개' + (dupCells ? ' (빨강 표시됨)' : ''),
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+
+/** AF코드 열의 병합 하위칸(앵커 아닌 행) 집합 반환 {행:true} */
+function getMergeSkip(sh, col, last) {
+  var skip = {};
+  var merges = sh.getRange(1, col, last, 1).getMergedRanges();
+  for (var i = 0; i < merges.length; i++) {
+    var top = merges[i].getRow();
+    var n = merges[i].getNumRows();
+    for (var r = top + 1; r < top + n; r++) skip[r] = true;
+  }
+  return skip;
+}
+
+
 /** 각 주차 탭 '내부'의 기존 중복을 한번에 표시 (초기 점검용) */
 function checkAllAfDuplicates() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -533,10 +587,12 @@ function checkAllAfDuplicates() {
     if (last < 1) continue;
 
     var index = buildSheetIndex(sh); // 이 탭 내부만: 코드 -> [행,...]
+    var skip = getMergeSkip(sh, col, last); // 병합 하위칸 건너뛰기
     var vals = sh.getRange(1, col, last, 1).getValues();
     var dupCodesInTab = {};
 
     for (var i = 0; i < vals.length; i++) {
+      if (skip[i + 1]) continue;
       var v = String(vals[i][0]).trim();
       var cell = sh.getRange(i + 1, col);
       if (v === '' || !AFCODE_PATTERN.test(v)) { clearAfCell(cell); continue; }
@@ -573,7 +629,11 @@ function clearAfMarksSheet() {
   }
   var last = sh.getLastRow();
   if (last < 1) return;
-  for (var i = 1; i <= last; i++) clearAfCell(sh.getRange(i, col));
+  var skip = getMergeSkip(sh, col, last);
+  for (var i = 1; i <= last; i++) {
+    if (skip[i]) continue;
+    clearAfCell(sh.getRange(i, col));
+  }
   SpreadsheetApp.getActiveSpreadsheet().toast('AF 중복 표시 제거 완료', 'AF코드', 4);
 }
 
