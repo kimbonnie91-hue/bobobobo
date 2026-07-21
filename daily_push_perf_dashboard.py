@@ -1575,6 +1575,46 @@ def main():
         st.dataframe(drill.rename(columns={**METRIC_LABELS, "brand": "브랜드", "cat": "카테고리", "n": "캠페인수"}),
                      use_container_width=True, hide_index=True)
 
+        st.markdown("#### 요일 × 시간대 효율 히트맵")
+        st.caption(f"'{pick}' BPU를 요일·시간대로 쪼개서 비교해요. 진할수록 값이 높아요 — 어느 요일·시간대에 "
+                  "보내는 게 효율이 좋은지 한눈에 볼 수 있어요.")
+        DOW_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
+        heat_metric = st.selectbox("지표", list(RATE_LABELS), format_func=lambda k: RATE_LABELS[k],
+                                   index=list(RATE_LABELS).index("rps"), key="bpu_heat_metric")
+        hf = picked_df.dropna(subset=["dow", "hour"])
+        if hf.empty:
+            st.info("표시할 데이터가 없어요.")
+        else:
+            hg = hf.groupby(["dow", "hour"], dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+            hg["ctr"] = np.where(hg["send"] > 0, hg["uv"] / hg["send"], 0.0)
+            hg["cvr"] = np.where(hg["uv"] > 0, hg["oc"] / hg["uv"], 0.0)
+            hg["rps"] = np.where(hg["send"] > 0, hg["amt"] / hg["send"], 0.0)
+            hg["aov"] = np.where(hg["oc"] > 0, hg["amt"] / hg["oc"], 0.0)
+            hg["dow_k"] = hg["dow"].astype(int).map(lambda d: DOW_LABELS[d])
+            is_pct = heat_metric in ("ctr", "cvr")
+
+            pivot = hg.pivot_table(index="dow_k", columns="hour", values=heat_metric, fill_value=0)
+            pivot = pivot.reindex(DOW_LABELS)
+            x_labels = [f"{int(h):02d}시" for h in pivot.columns]
+            text = [[(f"{v:.1%}" if is_pct else f"{v:,.0f}") for v in row] for row in pivot.values]
+            fig = go.Figure(go.Heatmap(z=pivot.values, x=x_labels, y=pivot.index.tolist(), colorscale="Blues",
+                                       text=text, texttemplate="%{text}", textfont=dict(size=10),
+                                       hovertemplate="%{y} %{x}<br>" + RATE_LABELS[heat_metric] + ": %{text}<extra></extra>"))
+            fig.update_layout(height=340, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                              font=dict(color="#475569", size=11), margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("##### 효율 좋은 요일 × 시간대 TOP 10")
+            top = hg.sort_values(heat_metric, ascending=False).head(10)
+            show_top = top.rename(columns={"dow_k": "요일", "hour": "시간대", "send": "발송모수", "uv": "UV",
+                                           "oc": "주문건수", "amt": "거래액", **RATE_LABELS})
+            metric_label = RATE_LABELS[heat_metric]
+            fmt = {"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}"}
+            fmt[metric_label] = "{:.2%}" if is_pct else "{:,.0f}"
+            st.dataframe(show_top[["요일", "시간대", "발송모수", "UV", "주문건수", "거래액", metric_label]]
+                        .style.format(fmt), use_container_width=True, hide_index=True)
+
     # ══════════════════════════════════════════════════════════
     # 발송유형별 실적
     # ══════════════════════════════════════════════════════════
