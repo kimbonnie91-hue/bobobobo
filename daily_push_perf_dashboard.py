@@ -1594,9 +1594,13 @@ def main():
             hg["dow_k"] = hg["dow"].astype(int).map(lambda d: DOW_LABELS[d])
             is_pct = heat_metric in ("ctr", "cvr")
 
+            def _hhmm(h):
+                s = f"{int(h):04d}"
+                return f"{s[:2]}:{s[2:]}"
+
             pivot = hg.pivot_table(index="dow_k", columns="hour", values=heat_metric, fill_value=0)
             pivot = pivot.reindex(DOW_LABELS)
-            x_labels = [f"{int(h):02d}시" for h in pivot.columns]
+            x_labels = [_hhmm(h) for h in pivot.columns]
             text = [[(f"{v:.1%}" if is_pct else f"{v:,.0f}") for v in row] for row in pivot.values]
             fig = go.Figure(go.Heatmap(z=pivot.values, x=x_labels, y=pivot.index.tolist(), colorscale="Blues",
                                        text=text, texttemplate="%{text}", textfont=dict(size=10),
@@ -1606,14 +1610,18 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("##### 효율 좋은 요일 × 시간대 TOP 10")
-            top = hg.sort_values(heat_metric, ascending=False).head(10)
-            show_top = top.rename(columns={"dow_k": "요일", "hour": "시간대", "send": "발송모수", "uv": "UV",
+            top = hg.sort_values(heat_metric, ascending=False).head(10).copy()
+            top["시간대"] = top["hour"].map(_hhmm)
+            show_top = top.rename(columns={"dow_k": "요일", "send": "발송모수", "uv": "UV",
                                            "oc": "주문건수", "amt": "거래액", **RATE_LABELS})
             metric_label = RATE_LABELS[heat_metric]
-            fmt = {"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}"}
+            cols = ["요일", "시간대", "발송모수", "UV", "주문건수", "거래액", RATE_LABELS["ctr"], RATE_LABELS["cvr"]]
+            if metric_label not in cols:
+                cols.append(metric_label)
+            fmt = {"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                  RATE_LABELS["ctr"]: "{:.2%}", RATE_LABELS["cvr"]: "{:.2%}"}
             fmt[metric_label] = "{:.2%}" if is_pct else "{:,.0f}"
-            st.dataframe(show_top[["요일", "시간대", "발송모수", "UV", "주문건수", "거래액", metric_label]]
-                        .style.format(fmt), use_container_width=True, hide_index=True)
+            st.dataframe(show_top[cols].style.format(fmt), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 발송유형별 실적
