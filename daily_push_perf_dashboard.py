@@ -532,7 +532,7 @@ def main():
 
     st.sidebar.caption(f"필터 후 {len(f):,}건 · 전체 {len(df):,}건")
 
-    page = st.sidebar.radio("페이지", ["종합요약", "BPU별 실적", "발송유형별 실적", "주차별 누적 추이", "AF코드별 리더보드", "데이터"])
+    page = st.sidebar.radio("페이지", ["종합요약", "BPU별 실적", "발송유형별 실적", "요일·시간대 효율", "주차별 누적 추이", "AF코드별 리더보드", "데이터"])
 
     # ══════════════════════════════════════════════════════════
     # 종합요약
@@ -628,6 +628,134 @@ def main():
         st.markdown("#### 발송유형 × BPU")
         pivot = f.pivot_table(index="bpu", columns="stype", values=metric, aggfunc="sum", fill_value=0)
         st.dataframe(pivot.style.format("{:,.0f}"), use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════
+    # 요일·시간대 효율
+    # ══════════════════════════════════════════════════════════
+    elif page == "요일·시간대 효율":
+        st.title("요일·시간대 효율")
+        st.caption("BPU별로 어느 요일·시간대에 발송했을 때 효율이 좋은지 비교해요. "
+                   "요일은 발송일자(일자)로 계산하고, 시간대는 '시' 단위로 묶어요. "
+                   "효율지표는 발송량이 다른 슬롯을 공정하게 견주려고 각 슬롯의 합계에서 다시 계산해요.")
+
+        DOW_KR = ["월", "화", "수", "목", "금", "토", "일"]
+
+        def _hod(h):  # 시간대(HHMM 또는 시) → 시(0~23). 1600→16, 14→14, 800→8
+            if h is None or (isinstance(h, float) and np.isnan(h)):
+                return None
+            h = int(h)
+            return h // 100 if h >= 100 else h
+
+        fe = f.copy()
+        fe["hod"] = fe["hour"].map(_hod)
+        fe = fe[fe["dow"].notna() & fe["hod"].notna()].copy()
+        if fe.empty:
+            st.info("요일·시간대를 계산할 데이터가 없어요. (일자·시간대 값이 채워져 있는지 확인해 주세요)")
+            st.stop()
+        fe["dow"] = fe["dow"].astype(int)
+        fe["hod"] = fe["hod"].astype(int)
+
+        cc1, cc2 = st.columns([1, 1])
+        eff_metric = cc1.selectbox("효율 지표", ["rps", "ctr", "cvr", "aov"],
+                                   format_func=lambda k: RATE_LABELS[k], key="eff_metric",
+                                   help="RPS(발송당 거래액)가 발송 효율을 가장 종합적으로 보여줘요.")
+        min_send = cc2.number_input("셀 최소 발송모수", min_value=0, value=1000, step=500,
+                                    help="발송모수가 이보다 적은 요일·시간대 칸은 효율이 크게 튀어서 제외해요.")
+
+        def _fm(v):  # 효율값 포맷 — 전환율류는 %, 금액류는 정수
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                return "–"
+            return f"{v:.2%}" if eff_metric in ("ctr", "cvr") else f"{v:,.0f}"
+
+        # ── ① BPU별 최적 발송 슬롯 요약 ──
+        st.markdown("#### BPU별 최적 발송 슬롯")
+        st.caption(f"각 BPU에서 **{RATE_LABELS[eff_metric]}**가 가장 높았던 요일·시간대예요 "
+                   f"(발송모수 {min_send:,} 이상 슬롯만 비교).")
+
+        def _best(sub, cols):
+            g = agg_metrics(sub, cols)
+            g = g[g["send"] >= min_send]
+            if g.empty:
+                return "–", np.nan, 0.0
+            r = g.sort_values(eff_metric, ascending=False).iloc[0]
+            if cols == ["dow"]:
+                lbl = DOW_KR[int(r["dow"])]
+            elif cols == ["hod"]:
+                lbl = f"{int(r['hod']):02d}시"
+            else:
+                lbl = f"{DOW_KR[int(r['dow'])]} {int(r['hod']):02d}시"
+            return lbl, r[eff_metric], r["send"]
+
+        summ = []
+        for bpu in sorted([b for b in fe["bpu"].unique() if b]):
+            sub = fe[fe["bpu"] == bpu]
+            d_lbl, d_val, _ = _best(sub, ["dow"])
+            h_lbl, h_val, _ = _best(sub, ["hod"])
+            c_lbl, c_val, c_send = _best(sub, ["dow", "hod"])
+            tot = agg_metrics(sub, ["bpu"])
+            avg_val = tot[eff_metric].iloc[0] if not tot.empty else np.nan
+            summ.append({
+                "BPU": bpu,
+                "최적 요일": d_lbl, "요일 효율": _fm(d_val),
+                "최적 시간대": h_lbl, "시간 효율": _fm(h_val),
+                "최적 요일·시간대": c_lbl, "슬롯 효율": _fm(c_val),
+                "슬롯 발송모수": f"{c_send:,.0f}",
+                "BPU 평균": _fm(avg_val),
+            })
+        if summ:
+            st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True)
+        else:
+            st.info("BPU 데이터가 부족해요. 최소 발송모수를 낮춰 보세요.")
+
+        # ── ② 요일 × 시간대 히트맵 ──
+        st.markdown("#### 요일 × 시간대 히트맵")
+        bpu_opts = ["(전체)"] + sorted([b for b in fe["bpu"].unique() if b])
+        pick = st.selectbox("BPU 선택", bpu_opts, key="eff_bpu_pick")
+        sub = fe if pick == "(전체)" else fe[fe["bpu"] == pick]
+
+        gc = agg_metrics(sub, ["dow", "hod"])
+        gc = gc[gc["send"] >= min_send]
+        if gc.empty:
+            st.info("선택한 조건에서 최소 발송모수를 넘는 슬롯이 없어요. 임계값을 낮춰 보세요.")
+        else:
+            hods = sorted(sub["hod"].unique())
+            val = {(int(r["dow"]), int(r["hod"])): r[eff_metric] for _, r in gc.iterrows()}
+            snd = {(int(r["dow"]), int(r["hod"])): r["send"] for _, r in gc.iterrows()}
+            z, txt, hov = [], [], []
+            for d in range(7):
+                zr, tr, hr = [], [], []
+                for h in hods:
+                    v = val.get((d, h))
+                    zr.append(v)
+                    tr.append(_fm(v) if v is not None else "")
+                    if v is None:
+                        hr.append(f"{DOW_KR[d]} {h:02d}시<br>발송모수 기준 미달")
+                    else:
+                        hr.append(f"{DOW_KR[d]} {h:02d}시<br>{RATE_LABELS[eff_metric]}: {_fm(v)}"
+                                  f"<br>발송모수: {snd.get((d, h), 0):,.0f}")
+                z.append(zr); txt.append(tr); hov.append(hr)
+            fig = go.Figure(go.Heatmap(
+                z=z, x=[f"{h:02d}시" for h in hods], y=DOW_KR,
+                text=txt, texttemplate="%{text}", textfont=dict(size=10),
+                customdata=hov, hovertemplate="%{customdata}<extra></extra>",
+                colorscale="Blues", hoverongaps=False,
+                colorbar=dict(title=dict(text=RATE_LABELS[eff_metric], side="right"))))
+            fig.update_layout(**base_layout(h=360, title=f"{pick} · 요일 × 시간대 {RATE_LABELS[eff_metric]}"))
+            fig.update_yaxes(autorange="reversed")  # 월요일이 맨 위로
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("색이 진할수록 효율이 높아요. 빈 칸은 발송모수가 기준보다 적어 제외한 슬롯이에요.")
+
+            # ── ③ 슬롯 랭킹 ──
+            st.markdown("#### 슬롯 랭킹 (상위 20)")
+            rank = gc.sort_values(eff_metric, ascending=False).copy()
+            rank["요일"] = rank["dow"].map(lambda i: DOW_KR[int(i)])
+            rank["시간대"] = rank["hod"].map(lambda x: f"{int(x):02d}시")
+            show = rank[["요일", "시간대", "n", "send", "uv", "oc", "amt", eff_metric]].head(20).rename(
+                columns={"n": "캠페인수", "send": "발송모수", "uv": "UV", "oc": "주문건수",
+                         "amt": "거래액", eff_metric: RATE_LABELS[eff_metric]})
+            fmt = {"발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                   RATE_LABELS[eff_metric]: ("{:.2%}" if eff_metric in ("ctr", "cvr") else "{:,.0f}")}
+            st.dataframe(show.style.format(fmt), use_container_width=True, hide_index=True)
 
     # ══════════════════════════════════════════════════════════
     # 주차별 누적 추이
