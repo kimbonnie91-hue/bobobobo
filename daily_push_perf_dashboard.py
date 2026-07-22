@@ -1475,18 +1475,20 @@ def main():
             ann["font"] = dict(color="#94a3b8", size=13)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### 전주 대비")
-        last_end = f["dt"].max().normalize()
-        this_start = last_end - pd.Timedelta(days=6)
+        st.markdown("#### 전주 대비 (월~일 기준)")
+        this_start = pd.Timestamp(f["week_start"].max())
+        this_end = this_start + pd.Timedelta(days=6)
         prev_start = this_start - pd.Timedelta(days=7)
         prev_end = this_start - pd.Timedelta(days=1)
-        cur = f[(f["dt"] >= this_start) & (f["dt"] <= last_end)]
+        cur = f[(f["dt"] >= this_start) & (f["dt"] <= this_end)]
         prev = f[(f["dt"] >= prev_start) & (f["dt"] <= prev_end)]
+        this_label = f"{this_start.month}/{this_start.day}~{this_end.month}/{this_end.day}"
+        prev_label = f"{prev_start.month}/{prev_start.day}~{prev_end.month}/{prev_end.day}"
         rows = []
         for k, label in METRIC_LABELS.items():
             cv, pv = cur[k].sum(), prev[k].sum()
             delta = (cv - pv) / pv * 100 if pv else np.nan
-            rows.append({"지표": label, "이번주(최근7일)": cv, "전주": pv, "증감%": delta})
+            rows.append({"지표": label, this_label: cv, prev_label: pv, "증감%": delta})
         n_count_rows = len(rows)
         cur_send, prev_send = cur["send"].sum(), prev["send"].sum()
         cur_uv, prev_uv = cur["uv"].sum(), prev["uv"].sum()
@@ -1495,15 +1497,15 @@ def main():
         ctr_prev = prev_uv / prev_send if prev_send else np.nan
         cr_cur = cur_oc / cur_uv if cur_uv else np.nan
         cr_prev = prev_oc / prev_uv if prev_uv else np.nan
-        rows.append({"지표": "CTR(UV/발송)", "이번주(최근7일)": ctr_cur, "전주": ctr_prev,
+        rows.append({"지표": "CTR(UV/발송)", this_label: ctr_cur, prev_label: ctr_prev,
                     "증감%": ((ctr_cur - ctr_prev) / ctr_prev * 100 if prev_send and ctr_prev else np.nan)})
-        rows.append({"지표": "CR(주문/UV)", "이번주(최근7일)": cr_cur, "전주": cr_prev,
+        rows.append({"지표": "CR(주문/UV)", this_label: cr_cur, prev_label: cr_prev,
                     "증감%": ((cr_cur - cr_prev) / cr_prev * 100 if prev_uv and cr_prev else np.nan)})
         show = pd.DataFrame(rows)
-        sty = show.style.format({"이번주(최근7일)": "{:,.0f}", "전주": "{:,.0f}"},
-                                subset=pd.IndexSlice[0:n_count_rows - 1, ["이번주(최근7일)", "전주"]])
-        sty = sty.format({"이번주(최근7일)": "{:.2%}", "전주": "{:.2%}"},
-                         subset=pd.IndexSlice[n_count_rows:n_count_rows + 1, ["이번주(최근7일)", "전주"]])
+        sty = show.style.format({this_label: "{:,.0f}", prev_label: "{:,.0f}"},
+                                subset=pd.IndexSlice[0:n_count_rows - 1, [this_label, prev_label]])
+        sty = sty.format({this_label: "{:.2%}", prev_label: "{:.2%}"},
+                         subset=pd.IndexSlice[n_count_rows:n_count_rows + 1, [this_label, prev_label]])
         sty = sty.format({"증감%": "{:+.1f}%"}, subset=pd.IndexSlice[:, ["증감%"]])
         st.dataframe(sty, use_container_width=True, hide_index=True)
 
