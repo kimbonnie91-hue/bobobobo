@@ -785,9 +785,13 @@ def gs_open(creds_dict, spreadsheet):
 
 
 def gs_read_ws(sh, title, cols):
+    """워크시트가 아예 없으면(최초 사용) 빈 표를 돌려준다 — 이건 정상 케이스.
+    반면 API 오류(쿼터/네트워크 등)는 여기서 삼키지 않고 그대로 올려보낸다 — 호출부가 이걸
+    '데이터 없음'으로 착각해 병합·덮어쓰기하면 기존 누적 데이터가 통째로 지워지기 때문."""
+    import gspread
     try:
         ws = sh.worksheet(title)
-    except Exception:
+    except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame(columns=cols)
     vals = ws.get_all_values()
     if not vals or len(vals) < 2:
@@ -1132,11 +1136,11 @@ def main():
             return {"mode": "local", "status": f"⚠️ 구글시트 연결 실패 → 로컬에 저장해요 ({msg})"}
 
     def storage_load(bk):
+        """gsheets 모드에서 읽기 실패는 여기서 감추지 않고 그대로 예외를 던진다 — 호출부가
+        '빈 데이터'로 착각해 병합 후 저장하면 기존 누적 데이터를 지워버릴 수 있기 때문.
+        호출부에서 반드시 실패 시 저장을 중단하도록 처리해야 한다."""
         if bk["mode"] == "gsheets":
-            try:
-                return gs_read_ws(bk["sh"], GS_TITLE, STORE_COLS)
-            except Exception:
-                return pd.DataFrame(columns=STORE_COLS)
+            return gs_read_ws(bk["sh"], GS_TITLE, STORE_COLS)
         return load_store()
 
     def storage_save(bk, df):
@@ -1185,27 +1189,39 @@ def main():
         st.sidebar.success("저장된 데이터를 초기화했어요.")
 
     if apply_clicked and uploaded:
-        old = storage_load(BK)
-        frames, all_used = [], []
-        with st.sidebar.status("엑셀 읽는 중... (RawNew가 크면 시간이 걸려요)", expanded=False) as _status:
-            for f in uploaded:
-                d, used = cached_load_excel(f.getvalue())
-                if not d.empty:
-                    frames.append(d)
-                    all_used.extend([f"{f.name} · {u}" for u in used])
-            _status.update(label="완료", state="complete")
-        if not frames:
-            st.sidebar.error("인식 가능한 시트를 찾지 못했어요. '누적_소재별'/'소재별 실적(당주)' 시트가 있는지 확인해 주세요.")
+        try:
+            old = storage_load(BK)
+        except Exception as e:
+            st.sidebar.error(f"⚠️ 기존 누적 데이터를 불러오지 못해 반영을 중단했어요 ({str(e)[:150].strip()}). "
+                             "이 상태로 반영하면 기존 데이터가 사라질 수 있어요 — 새로고침 후 다시 시도해 주세요.")
         else:
-            new = pd.concat(frames, ignore_index=True)
-            merged = merge_store(old, new)
-            storage_save(BK, merged)
-            st.sidebar.success(f"{len(new):,}건 반영 완료 (누적 {len(merged):,}건)")
-            with st.sidebar.expander("읽은 시트"):
-                for u in all_used:
-                    st.caption(u)
+            frames, all_used = [], []
+            with st.sidebar.status("엑셀 읽는 중... (RawNew가 크면 시간이 걸려요)", expanded=False) as _status:
+                for f in uploaded:
+                    d, used = cached_load_excel(f.getvalue())
+                    if not d.empty:
+                        frames.append(d)
+                        all_used.extend([f"{f.name} · {u}" for u in used])
+                _status.update(label="완료", state="complete")
+            if not frames:
+                st.sidebar.error("인식 가능한 시트를 찾지 못했어요. '누적_소재별'/'소재별 실적(당주)' 시트가 있는지 확인해 주세요.")
+            else:
+                new = pd.concat(frames, ignore_index=True)
+                merged = merge_store(old, new)
+                storage_save(BK, merged)
+                st.sidebar.success(f"{len(new):,}건 반영 완료 (누적 {len(merged):,}건)")
+                with st.sidebar.expander("읽은 시트"):
+                    for u in all_used:
+                        st.caption(u)
 
-    raw = storage_load(BK)
+    try:
+        raw = storage_load(BK)
+    except Exception as e:
+        st.error(f"⚠️ 구글시트에서 데이터를 불러오지 못했어요 ({str(e)[:200].strip()}). "
+                 "이 상태에서 저장하면 기존 누적 데이터가 사라질 수 있어 안전을 위해 여기서 멈춰요. "
+                 "새로고침해서 다시 시도해 주세요 — 계속 실패하면 구글시트 API 사용량 제한이거나 "
+                 "시트 공유 권한 문제일 수 있어요.")
+        st.stop()
     df = _finalize(raw)
 
     st.sidebar.markdown("---")
@@ -2082,14 +2098,20 @@ def main():
                 if final_rows is None or final_rows.empty:
                     st.warning("저장할 유효한 행이 없어요. AF코드와 일자(8자리)를 채워주세요.")
                 else:
-                    merged = merge_store(storage_load(BK), final_rows[STORE_COLS])
-                    storage_save(BK, merged)
-                    st.success(f"{len(final_rows):,}건 저장 완료 (누적 {len(merged):,}건)")
-                    st.session_state.manual_editor_ver += 1
-                    st.session_state.pop("results_override", None)
-                    st.session_state.pop("results_override_id", None)
-                    st.session_state.pop("plan_import_rows", None)
-                    st.rerun()
+                    try:
+                        old_for_merge = storage_load(BK)
+                    except Exception as e:
+                        st.error(f"⚠️ 기존 누적 데이터를 불러오지 못해 저장을 중단했어요 ({str(e)[:150].strip()}). "
+                                 "이 상태로 저장하면 기존 데이터가 사라질 수 있어요 — 새로고침 후 다시 시도해 주세요.")
+                    else:
+                        merged = merge_store(old_for_merge, final_rows[STORE_COLS])
+                        storage_save(BK, merged)
+                        st.success(f"{len(final_rows):,}건 저장 완료 (누적 {len(merged):,}건)")
+                        st.session_state.manual_editor_ver += 1
+                        st.session_state.pop("results_override", None)
+                        st.session_state.pop("results_override_id", None)
+                        st.session_state.pop("plan_import_rows", None)
+                        st.rerun()
             if c2.button("↺ 비우기", use_container_width=True):
                 st.session_state.manual_editor_ver += 1
                 st.session_state.pop("results_override", None)
