@@ -1141,9 +1141,16 @@ def main():
 
     def storage_save(bk, df):
         if bk["mode"] == "gsheets":
-            gs_write_ws(bk["sh"], GS_TITLE, df, STORE_COLS)
-        else:
-            save_store(df)
+            try:
+                gs_write_ws(bk["sh"], GS_TITLE, df, STORE_COLS)
+                return
+            except Exception as e:
+                save_store(df)
+                msg = str(e)[:200].strip() or type(e).__name__
+                st.warning(f"⚠️ 구글시트 저장 실패 → 로컬 CSV에 저장했어요 ({msg}). "
+                          "구글시트 API 사용량 제한(잠시 후 재시도)이거나 시트 공유 권한 문제일 수 있어요.")
+                return
+        save_store(df)
 
     def storage_clear(bk):
         if bk["mode"] == "gsheets":
