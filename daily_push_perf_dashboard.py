@@ -1447,6 +1447,96 @@ def main():
                        "해당 기간에 데이터가 없으면 '-'로 표시돼요. 전월비는 기준주 시작일의 한 달 전 날짜가 속한 "
                        "주(전월 동주)와 비교해요. ✱ = CTR·주문CR의 증감이 통계적으로 유의(p<0.05).").replace("~", "\\~"))
 
+            st.markdown("---")
+            st.markdown("#### 🔍 주간 트렌드 리뷰")
+            st.caption("목표: 발송량은 줄이면서(피로도↓) UV·CTR은 높이는 것 — 최근 주차 흐름을 이 기준으로 짚어봐요.")
+
+            trend_n = 8
+            wk_trend = f[f["week_start"] <= cur_start].groupby(
+                ["week_start", "week_label"], dropna=False
+            ).agg(send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum"),
+                  n_camp=("af", "nunique")).reset_index().sort_values("week_start").tail(trend_n)
+            wk_trend["ctr"] = np.where(wk_trend["send"] > 0, wk_trend["uv"] / wk_trend["send"], np.nan)
+
+            if len(wk_trend) < 2:
+                st.info("흐름을 분석하려면 최소 2주 이상의 데이터가 필요해요.")
+            else:
+                def _week_trend(vals):
+                    vals = [v for v in vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+                    if len(vals) < 2:
+                        return None
+                    diffs = np.diff(vals)
+                    ups, downs = int((diffs > 0).sum()), int((diffs < 0).sum())
+                    pct = (vals[-1] - vals[0]) / vals[0] * 100 if vals[0] else None
+                    if ups and downs and abs(ups - downs) <= 1:
+                        pattern = "등락 반복"
+                    elif ups >= downs:
+                        pattern = "상승"
+                    else:
+                        pattern = "하락"
+                    return {"first": vals[0], "last": vals[-1], "pct": pct, "pattern": pattern}
+
+                t_send = _week_trend(wk_trend["send"].tolist())
+                t_uv = _week_trend(wk_trend["uv"].tolist())
+                t_ctr = _week_trend(wk_trend["ctr"].tolist())
+                t_camp = _week_trend(wk_trend["n_camp"].tolist())
+                span = (f"{wk_trend.iloc[0]['week_label']} ~ {wk_trend.iloc[-1]['week_label']} "
+                       f"({len(wk_trend)}주)").replace("~", "\\~")
+
+                def _fmt_pct(t):
+                    return f"{t['pct']:+.1f}%" if t and t["pct"] is not None else "–"
+
+                st.markdown(f"**{span} 흐름**")
+                if t_send:
+                    good = t_send["pattern"] == "하락"
+                    icon = "✅" if good else ("⚠️" if t_send["pattern"] == "등락 반복" else "❌")
+                    comment = ("목표대로 줄이는 흐름이에요." if good else
+                              "일정하지 않게 오르내려요." if t_send["pattern"] == "등락 반복" else
+                              "오히려 늘고 있어요 — 감축이 필요해요.")
+                    st.markdown(f"{icon} **발송량**: {t_send['first']:,.0f}건 → {t_send['last']:,.0f}건 "
+                               f"({_fmt_pct(t_send)}, {t_send['pattern']}) — {comment}")
+                if t_camp:
+                    st.markdown(f"　· 캠페인수(발송빈도): {t_camp['first']:,.0f}건 → {t_camp['last']:,.0f}건 "
+                               f"({_fmt_pct(t_camp)}, {t_camp['pattern']}) — 피로도와 직결되는 보조 지표예요.")
+                if t_uv:
+                    good = t_uv["pattern"] == "상승"
+                    icon = "✅" if good else ("⚠️" if t_uv["pattern"] == "등락 반복" else "❌")
+                    comment = ("목표대로 오르는 흐름이에요." if good else
+                              "등락이 있어 아직 뚜렷한 개선은 아니에요." if t_uv["pattern"] == "등락 반복" else
+                              "줄고 있어 주의가 필요해요.")
+                    st.markdown(f"{icon} **UV**: {t_uv['first']:,.0f} → {t_uv['last']:,.0f} "
+                               f"({_fmt_pct(t_uv)}, {t_uv['pattern']}) — {comment}")
+                if t_ctr:
+                    good = t_ctr["pattern"] == "상승"
+                    icon = "✅" if good else ("⚠️" if t_ctr["pattern"] == "등락 반복" else "❌")
+                    ctr_first_pp, ctr_last_pp = t_ctr["first"] * 100, t_ctr["last"] * 100
+                    comment = ("메시지 반응률이 개선되는 흐름이에요." if good else
+                              "눈에 띄는 개선은 아직이에요." if t_ctr["pattern"] == "등락 반복" else
+                              "반응률이 떨어지고 있어 피로도 신호일 수 있어요.")
+                    st.markdown(f"{icon} **CTR**: {ctr_first_pp:.2f}% → {ctr_last_pp:.2f}% "
+                               f"({ctr_last_pp - ctr_first_pp:+.2f}%p, {t_ctr['pattern']}) — {comment}")
+
+                send_good = bool(t_send and t_send["pattern"] == "하락")
+                uv_good = bool(t_uv and t_uv["pattern"] == "상승")
+                ctr_good = bool(t_ctr and t_ctr["pattern"] == "상승")
+                flags = [("발송량 감축", send_good), ("UV 상승", uv_good), ("CTR 상승", ctr_good)]
+                good_list = [name for name, ok in flags if ok]
+                bad_list = [name for name, ok in flags if not ok]
+                n_good = len(good_list)
+
+                if n_good == 3:
+                    verdict = ("🟢 **목표에 부합하는 이상적인 흐름이에요** — 발송은 줄이면서 UV·CTR은 함께 오르고 있어, "
+                              "더 적은 발송으로 더 좋은 반응을 끌어내고 있어요.")
+                elif n_good == 0:
+                    verdict = (f"🔴 **목표와 반대 방향으로 가고 있어요** — {', '.join(bad_list)} 모두 아쉬운 흐름이에요. "
+                              "발송량과 타겟팅·오퍼를 함께 재점검해볼 시점이에요.")
+                else:
+                    verdict = (f"🟡 **부분적으로 목표에 부합해요** — {', '.join(good_list)}은(는) 잘 되고 있지만, "
+                              f"{', '.join(bad_list)}은(는) 더 필요해요.")
+                st.markdown(verdict)
+                st.caption("판정 기준: 각 지표가 조회 구간 내내 순감소/순증가면 하락/상승, 오르내림이 섞이면 '등락 반복'으로 봐요 "
+                          "(등락 반복은 목표 미달로 간주). 구간이 짧으면(2~3주) 노이즈일 수 있으니 참고용으로만 봐주세요.")
+
     # ══════════════════════════════════════════════════════════
     # 종합요약
     # ══════════════════════════════════════════════════════════
