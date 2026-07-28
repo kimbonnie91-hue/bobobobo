@@ -1487,6 +1487,40 @@ def main():
                     return f"{t['pct']:+.1f}%" if t and t["pct"] is not None else "–"
 
                 st.markdown(f"**{span} 흐름**")
+
+                def _goal_color(t, good_pattern):
+                    if not t:
+                        return "#94a3b8"
+                    if t["pattern"] == good_pattern:
+                        return "#22a55e"
+                    if t["pattern"] == "등락 반복":
+                        return "#f59e0b"
+                    return "#ef4444"
+
+                send_c = _goal_color(t_send, "하락")
+                uv_c = _goal_color(t_uv, "상승")
+                ctr_c = _goal_color(t_ctr, "상승")
+
+                trend_fig = make_subplots(rows=1, cols=3,
+                                          subplot_titles=["발송량 (↓ 목표)", "UV (↑ 목표)", "CTR (↑ 목표)"])
+                trend_fig.add_trace(go.Bar(x=wk_trend["week_label"], y=wk_trend["send"],
+                                           marker_color=send_c, showlegend=False), row=1, col=1)
+                trend_fig.add_trace(go.Scatter(x=wk_trend["week_label"], y=wk_trend["uv"], mode="lines+markers",
+                                               line=dict(color=uv_c, width=2), marker=dict(size=6),
+                                               showlegend=False), row=1, col=2)
+                trend_fig.add_trace(go.Scatter(x=wk_trend["week_label"], y=wk_trend["ctr"], mode="lines+markers",
+                                               line=dict(color=ctr_c, width=2), marker=dict(size=6),
+                                               showlegend=False), row=1, col=3)
+                trend_fig.update_yaxes(tickformat=".1%", row=1, col=3)
+                trend_fig.update_layout(height=260, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                        font=dict(color="#475569", size=11), margin=dict(l=10, r=10, t=40, b=10))
+                trend_fig.update_xaxes(gridcolor="rgba(0,0,0,0)", linecolor="#e2e8f0", tickangle=-30)
+                trend_fig.update_yaxes(gridcolor="#f1f5f9", linecolor="#e2e8f0")
+                for ann in trend_fig["layout"]["annotations"]:
+                    ann["font"] = dict(color="#94a3b8", size=13)
+                st.plotly_chart(trend_fig, use_container_width=True)
+                st.caption("🟢 초록 = 목표 방향(발송↓/UV·CTR↑), 🟠 주황 = 등락 반복, 🔴 빨강 = 목표 반대 방향.")
+
                 if t_send:
                     good = t_send["pattern"] == "하락"
                     icon = "✅" if good else ("⚠️" if t_send["pattern"] == "등락 반복" else "❌")
