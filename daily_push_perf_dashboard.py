@@ -1228,7 +1228,10 @@ def main():
     st.sidebar.markdown("**필터**")
     if not df.empty:
         dmin, dmax = df["dt"].min().date(), df["dt"].max().date()
-        date_range = st.sidebar.date_input("기간", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+        default_end = min(dmax, datetime.date.today())
+        if default_end < dmin:
+            default_end = dmax
+        date_range = st.sidebar.date_input("기간", value=(dmin, default_end), min_value=dmin, max_value=dmax)
         bpu_sel = st.sidebar.multiselect("BPU", sorted([b for b in df["bpu"].unique() if b]))
         stype_sel = st.sidebar.multiselect("발송유형", sorted([s for s in df["stype"].unique() if s]))
         search = st.sidebar.text_input("검색 (브랜드/AF코드/담당자)", "")
