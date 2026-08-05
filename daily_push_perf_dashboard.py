@@ -954,6 +954,12 @@ def _norm_hour_val(v):
         return s
 
 
+def _hhmm(h):
+    """HHMM 인코딩된 시간대 값(예: 800/1350/1920) → 'HH:MM' 문자열(예: '08:00'/'13:50'/'19:20')."""
+    s = f"{int(h):04d}"
+    return f"{s[:2]}:{s[2:]}"
+
+
 # REQUEST_COPY 조회 키 우선순위 — 시트에 있는 컬럼만큼만 써서 매칭한다(모두 있으면 3개 다 사용,
 # 일자/시간대가 없으면 기획전 번호만으로 매칭 — parse_request_copy_rows의 반환값 key_cols 참고).
 REQUEST_COPY_KEY_ORDER = ["date", "hour", "promo"]
@@ -1746,10 +1752,6 @@ def main():
             hg["dow_k"] = hg["dow"].astype(int).map(lambda d: DOW_LABELS[d])
             is_pct = heat_metric in ("ctr", "cvr")
 
-            def _hhmm(h):
-                s = f"{int(h):04d}"
-                return f"{s[:2]}:{s[2:]}"
-
             pivot = hg.pivot_table(index="dow_k", columns="hour", values=heat_metric, fill_value=0)
             pivot = pivot.reindex(DOW_LABELS)
             x_labels = [_hhmm(h) for h in pivot.columns]
@@ -1867,25 +1869,30 @@ def main():
 
                 st.markdown("#### 일자별 상세")
                 weeks_sorted = cf[["week_start", "week_label"]].drop_duplicates().sort_values("week_start")
-                d1, d2 = st.columns(2)
+                hours_sorted = sorted(cf["hour"].dropna().unique())
+                d1, d2, d3 = st.columns(3)
                 brand_pick = d1.multiselect("브랜드", sorted([b for b in cf["brand"].unique() if b]),
                                             key="camp_detail_brand_pick")
                 week_pick = d2.multiselect("주차", weeks_sorted["week_label"].tolist(),
                                            key="camp_detail_week_pick")
+                hour_pick = d3.multiselect("시간대", hours_sorted, format_func=_hhmm, key="camp_detail_hour_pick")
                 detail_f = cf
                 if brand_pick:
                     detail_f = detail_f[detail_f["brand"].isin(brand_pick)]
                 if week_pick:
                     detail_f = detail_f[detail_f["week_label"].isin(week_pick)]
+                if hour_pick:
+                    detail_f = detail_f[detail_f["hour"].isin(hour_pick)]
 
                 detail = detail_f.sort_values("dt", ascending=False)[
-                    ["date", "hour", "week_label", "cat", "brand", "send", "uv", "oc", "amt", "ctr", "cvr", "rps"]]
+                    ["date", "hour", "week_label", "cat", "brand", "send", "uv", "oc", "amt", "ctr", "cvr", "rps"]].copy()
+                detail["hour"] = detail["hour"].map(lambda h: _hhmm(h) if pd.notna(h) else "")
                 show_detail = detail.rename(columns={"date": "일자", "hour": "시간대", "week_label": "주차",
                                                      "cat": "카테고리", "brand": "브랜드", "ctr": "CTR",
                                                      "cvr": "CR", "rps": "효율", **METRIC_LABELS})
                 st.caption(f"{len(show_detail):,}행")
                 st.dataframe(show_detail.style.format({
-                    "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
                     "CTR": "{:.2%}", "CR": "{:.2%}", "효율": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
 
