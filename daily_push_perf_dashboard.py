@@ -1191,8 +1191,19 @@ def main():
     clear_clicked = c2.button("🗑️ 초기화", use_container_width=True)
 
     if clear_clicked:
-        storage_clear(BK)
-        st.sidebar.success("저장된 데이터를 초기화했어요.")
+        st.session_state.confirm_clear = True
+
+    if st.session_state.get("confirm_clear"):
+        st.sidebar.warning("⚠️ 저장된 데이터를 전부 지울까요? 되돌릴 수 없어요.")
+        cc1, cc2 = st.sidebar.columns(2)
+        if cc1.button("✅ 네, 삭제", use_container_width=True, key="confirm_clear_yes"):
+            storage_clear(BK)
+            st.session_state.confirm_clear = False
+            st.sidebar.success("저장된 데이터를 초기화했어요.")
+            st.rerun()
+        if cc2.button("취소", use_container_width=True, key="confirm_clear_no"):
+            st.session_state.confirm_clear = False
+            st.rerun()
 
     if apply_clicked and uploaded:
         try:
