@@ -1788,6 +1788,123 @@ def main():
             fmt[metric_label] = "{:.2%}" if is_pct else "{:,.0f}"
             st.dataframe(show_top[cols].style.format(fmt), use_container_width=True, hide_index=True)
 
+        st.markdown("#### 🗓️ 컨틴구좌 배정 추천 (월~목 16시)")
+        st.caption("정책 변경으로 신설된 월~목 16시 컨틴전시 구좌에 어떤 BPU·브랜드를 배정하면 좋을지, "
+                  "'효율(그 시간대 실적)'과 '형평성(마지막 배정 이후 경과 주차)'을 함께 봐서 추천해요. "
+                  "실제 발송 기록에서 16시(hour=1600) + 월~목 발송분을 컨틴 배정 이력의 대리 지표로 사용해요.")
+
+        contin_hour = 1600
+        contin_dow = [0, 1, 2, 3]
+        cf_contin = f[(f["hour"] == contin_hour) & (f["dow"].isin(contin_dow))]
+
+        st.markdown("##### 1) 요일 × BPU 매칭 추천")
+        st.caption("각 BPU가 월~목 16시 중 어느 요일에 가장 효율이 좋은지 보여줘요. 진하게 표시된 셀이 "
+                  "그 BPU의 추천 요일이에요.")
+        match_metric = st.selectbox("지표", list(RATE_LABELS), format_func=lambda k: RATE_LABELS[k],
+                                    index=list(RATE_LABELS).index("rps"), key="contin_match_metric")
+        bpu_main = cf_contin[cf_contin["bpu_group"].str.match(r"^\d+BPU$", na=False)]
+        if bpu_main.empty:
+            st.info("월~목 16시 발송 이력이 없어서 매칭표를 만들 수 없어요.")
+        else:
+            mg = bpu_main.groupby(["bpu_group", "dow"], dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+            mg["ctr"] = np.where(mg["send"] > 0, mg["uv"] / mg["send"], 0.0)
+            mg["cvr"] = np.where(mg["uv"] > 0, mg["oc"] / mg["uv"], 0.0)
+            mg["rps"] = np.where(mg["send"] > 0, mg["amt"] / mg["send"], 0.0)
+            mg["aov"] = np.where(mg["oc"] > 0, mg["amt"] / mg["oc"], 0.0)
+            mg["dow_k"] = mg["dow"].astype(int).map(lambda d: DOW_LABELS[d])
+            match_pivot = mg.pivot_table(index="bpu_group", columns="dow_k", values=match_metric, fill_value=0)
+            match_pivot = match_pivot.reindex(columns=[DOW_LABELS[d] for d in contin_dow]).sort_index()
+            is_pct_m = match_metric in ("ctr", "cvr")
+            fmt_m = "{:.2%}" if is_pct_m else "{:,.0f}"
+            st.dataframe(match_pivot.style.highlight_max(axis=1, color="#c7e6d0").format(fmt_m),
+                        use_container_width=True)
+
+            best_day = match_pivot.idxmax(axis=1)
+            rec_lines = [f"- **{bpu}** → 추천 요일 **{best_day[bpu]}**" for bpu in match_pivot.index]
+            st.markdown("\n".join(rec_lines))
+            dup = best_day[best_day.duplicated(keep=False)]
+            if not dup.empty:
+                for d in dup.unique():
+                    conflicted = dup[dup == d].index.tolist()
+                    st.warning(f"⚠️ **{d}요일**을 {', '.join(conflicted)}가 동시에 원해요 — 차선책 요일과의 "
+                              "격차가 더 작은 쪽이 양보하는 식으로 조정해보세요.")
+
+        st.markdown("##### 2) 카테고리 → 브랜드 선정 (입점처럼 여러 브랜드가 경쟁하는 BPU용)")
+        st.caption("① 그 요일·16시에 카테고리별 평균 효율을 먼저 보고, ② 고른 카테고리 안에서 브랜드별로 "
+                  "'효율'과 '마지막 컨틴 배정 이후 경과 주차(형평성)'를 합산 점수로 랭킹해요.")
+        bpu_options_all = sorted(f["bpu_group"].unique().tolist())
+        cb1, cb2, cb3 = st.columns([1, 1, 1.4])
+        sel_bpu = cb1.selectbox("BPU 선택", bpu_options_all, key="contin_sel_bpu")
+        sel_dow_label = cb2.selectbox("요일 선택", [DOW_LABELS[d] for d in contin_dow], key="contin_sel_dow")
+        eff_weight = cb3.slider("효율 vs 형평성 가중치 (효율 쪽)", 0.0, 1.0, 0.5, 0.1, key="contin_eff_weight")
+        sel_dow = contin_dow[[DOW_LABELS[d] for d in contin_dow].index(sel_dow_label)]
+
+        slot_f = f[(f["bpu_group"] == sel_bpu) & (f["hour"] == contin_hour) & (f["dow"] == sel_dow)]
+        if slot_f.empty:
+            st.info(f"'{sel_bpu}'의 {sel_dow_label}요일 16시 발송 이력이 없어서 카테고리 랭킹을 만들 수 없어요.")
+        else:
+            cat_g = slot_f.groupby("cat", dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+            cat_g = cat_g[cat_g["cat"] != ""]
+            if cat_g.empty:
+                st.info("카테고리 정보가 있는 데이터가 없어요.")
+            else:
+                cat_g["rps"] = np.where(cat_g["send"] > 0, cat_g["amt"] / cat_g["send"], 0.0)
+                cat_g["ctr"] = np.where(cat_g["send"] > 0, cat_g["uv"] / cat_g["send"], 0.0)
+                cat_g = cat_g.sort_values("rps", ascending=False)
+                show_cat = cat_g.rename(columns={"cat": "카테고리", "send": "발송모수", "uv": "UV",
+                                                 "oc": "주문건수", "amt": "거래액", "rps": "RPS", "ctr": "CTR"})
+                st.dataframe(show_cat[["카테고리", "발송모수", "UV", "주문건수", "거래액", "RPS", "CTR"]].style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "주문건수": "{:,.0f}", "거래액": "{:,.0f}",
+                    "RPS": "{:,.0f}", "CTR": "{:.2%}",
+                }), use_container_width=True, hide_index=True)
+
+                sel_cat = st.selectbox("카테고리 선택 (브랜드 랭킹 보기)", cat_g["cat"].tolist(), key="contin_sel_cat")
+                cat_slot_f = slot_f[slot_f["cat"] == sel_cat]
+                cat_send_sum = cat_slot_f["send"].sum()
+                cat_avg_rps = cat_slot_f["amt"].sum() / cat_send_sum if cat_send_sum else 0.0
+
+                brand_g = cat_slot_f.groupby("brand", dropna=False).agg(
+                    send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
+                brand_g = brand_g[brand_g["brand"] != ""]
+                if brand_g.empty:
+                    st.info("이 카테고리에 브랜드 정보가 있는 데이터가 없어요.")
+                else:
+                    brand_g["rps"] = np.where(brand_g["send"] > 0, brand_g["amt"] / brand_g["send"], 0.0)
+                    brand_g["vs_cat_avg"] = np.where(cat_avg_rps > 0, brand_g["rps"] / cat_avg_rps, 0.0)
+
+                    ref_week_start = f.loc[f["dt"].idxmax(), "week_start"]
+                    hist_f = cf_contin[cf_contin["bpu_group"] == sel_bpu]
+                    last_assigned = hist_f.groupby("brand")["week_start"].max()
+
+                    def _elapsed_weeks(brand):
+                        if brand not in last_assigned.index or pd.isna(last_assigned[brand]):
+                            return 999
+                        return max(0, (ref_week_start - last_assigned[brand]).days // 7)
+
+                    brand_g["경과주차"] = brand_g["brand"].map(_elapsed_weeks)
+
+                    eff_vals = brand_g["rps"]
+                    eff_min, eff_max = eff_vals.min(), eff_vals.max()
+                    brand_g["eff_norm"] = ((eff_vals - eff_min) / (eff_max - eff_min)) if eff_max > eff_min else 1.0
+                    fair_vals = brand_g["경과주차"].clip(upper=52)
+                    f_min, f_max = fair_vals.min(), fair_vals.max()
+                    brand_g["fair_norm"] = ((fair_vals - f_min) / (f_max - f_min)) if f_max > f_min else 1.0
+
+                    brand_g["최종점수"] = brand_g["eff_norm"] * eff_weight + brand_g["fair_norm"] * (1 - eff_weight)
+                    brand_g = brand_g.sort_values("최종점수", ascending=False).reset_index(drop=True)
+
+                    show_brand = brand_g.rename(columns={"brand": "브랜드", "rps": "RPS",
+                                                         "vs_cat_avg": "카테고리 평균 대비"})
+                    show_brand["추천"] = ["🏆" if i == 0 else "" for i in range(len(show_brand))]
+                    cols_b = ["추천", "브랜드", "RPS", "카테고리 평균 대비", "경과주차", "최종점수"]
+                    st.dataframe(show_brand[cols_b].style.format({
+                        "RPS": "{:,.0f}", "카테고리 평균 대비": "{:.0%}", "최종점수": "{:.2f}",
+                    }), use_container_width=True, hide_index=True)
+                    st.caption("경과주차 999 = 이 BPU에서 월~목 16시 발송 이력이 아직 없는 브랜드(최우선 후보)예요. "
+                              "카테고리 평균 대비 70% 미만이면 품질 가드레일 차원에서 후순위 검토를 권장해요.")
+
     # ══════════════════════════════════════════════════════════
     # 발송유형별 실적
     # ══════════════════════════════════════════════════════════
