@@ -3,6 +3,7 @@ pandas
 openpyxl
 xlrd
 plotly
+altair
 scipy
 statsmodels
 numpy

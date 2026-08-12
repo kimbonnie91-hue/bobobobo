@@ -1270,7 +1270,7 @@ def main():
         f = df.copy()
 
     pages = ["주간보고", "종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
-             "✍️ 직접 입력", "데이터"]
+             "우수발송 대시보드", "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
     if df.empty and page not in ("✍️ 직접 입력", "데이터"):
@@ -2158,6 +2158,23 @@ def main():
                                     "거래액": "{:,.0f}", "CTR": "{:.2%}", "CR": "{:.2%}",
                                     "누적": ("{:.2%}" if is_pct else "{:,.0f}"), "WoW%": "{:+.1f}%"}),
                      use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════════════
+    # 우수발송 대시보드 — premium_push_dashboard.py의 render_premium_dashboard를
+    # 그대로 호출한다. 컬럼명만 그쪽이 기대하는 한글 이름으로 맞춰서 넘긴다.
+    # ══════════════════════════════════════════════════════════
+    elif page == "우수발송 대시보드":
+        from premium_push_dashboard import render_premium_dashboard, WEEKDAY_ORDER as PREMIUM_DOW
+        raw_premium = f.rename(columns={
+            "date": "날짜", "stype": "발송유형", "prio": "우선순위", "cat": "카테고리",
+            "attr": "속성", "brand": "브랜드", "promo": "기획전", "send": "발송",
+            "uv": "UV", "visit": "VISIT", "cust": "고객수", "oc": "주문건수", "amt": "주문금액",
+        }).copy()
+        raw_premium["요일"] = f["dow"].map(lambda d: PREMIUM_DOW[int(d)] if pd.notna(d) else "")
+        raw_premium["시간대"] = f["hour"]
+        raw_premium["BPU"] = f["bpu_group"]
+        raw_premium["주차"] = f["week_label"]
+        render_premium_dashboard(raw_premium)
 
     # ══════════════════════════════════════════════════════════
     # 직접 입력 — 엑셀 업로드 없이 표에서 바로 기록
