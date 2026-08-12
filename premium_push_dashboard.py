@@ -162,19 +162,25 @@ def as_table(t: pd.DataFrame, label_cols) -> pd.DataFrame:
 
 
 def heatmap(t, x_field, y_field, y_order, x_title, y_title, height=180):
-    """효율(발송건당 거래액) 히트맵. 셀 안에 수치를 같이 찍습니다."""
+    """효율(발송건당 거래액) 히트맵. 셀 안에 수치를 같이 찍습니다.
+
+    가독성을 위해: y축 제목은 생략(섹션 제목과 중복 + 세로로 돌아가며 라벨과 겹치는
+    문제가 있었음), 셀 사이 흰 테두리로 경계를 분명히 하고, 값/보조텍스트 글자를
+    키우고 간격을 넓혔다. 글자색 대비 기준도 데이터 범위 중앙값으로 바꿔 중간톤
+    셀에서도 잘 읽히게 했다."""
     # Vega 표현식 파서에 한글 필드명이 들어가지 않도록 ASCII 사본을 씁니다.
     t = t.copy()
     t["eff"] = t["효율"].astype(float)
-    hi = t["eff"].max()
-    cut = hi * 0.6 if pd.notna(hi) else float("inf")
+    lo, hi = t["eff"].min(), t["eff"].max()
+    cut = (lo + hi) / 2 if pd.notna(hi) else float("inf")
 
     base = alt.Chart(t).encode(
         x=alt.X(f"{x_field}:O", title=x_title, sort=None,
-                axis=alt.Axis(labelAngle=0)),
-        y=alt.Y(f"{y_field}:O", title=y_title, sort=y_order),
+                axis=alt.Axis(labelAngle=0, labelFontSize=12, titleFontSize=13)),
+        y=alt.Y(f"{y_field}:O", title=None, sort=y_order,
+                axis=alt.Axis(labelFontSize=13, labelFontWeight="bold", labelPadding=8)),
     )
-    rect = base.mark_rect().encode(
+    rect = base.mark_rect(stroke="white", strokeWidth=3).encode(
         color=alt.Color(
             "효율:Q",
             title="발송건당 거래액(원)",
@@ -192,16 +198,16 @@ def heatmap(t, x_field, y_field, y_order, x_title, y_title, height=180):
             alt.Tooltip("주문전환율:Q", title="주문전환율", format=".2%"),
         ],
     )
-    label = base.mark_text(fontSize=15, fontWeight="bold").encode(
+    label = base.mark_text(fontSize=19, fontWeight="bold", dy=-9).encode(
         text=alt.Text("효율:Q", format=",.1f"),
         color=alt.condition(
             alt.datum.eff > cut, alt.value("white"), alt.value("#1f2933"),
         ),
     )
-    sub = base.mark_text(fontSize=11, dy=16).encode(
+    sub = base.mark_text(fontSize=12, dy=13).encode(
         text=alt.Text("라벨:N"),
         color=alt.condition(
-            alt.datum.eff > cut, alt.value("white"), alt.value("#52514e"),
+            alt.datum.eff > cut, alt.value("#e8f1fc"), alt.value("#52514e"),
         ),
     )
     return (rect + label + sub).properties(height=height)
@@ -308,7 +314,7 @@ def render_premium_dashboard(raw: pd.DataFrame):
     y_order = [x for x in WEEKDAY_ORDER if x in set(dt["요일"])]
     st.altair_chart(
         heatmap(dt, "슬롯", "요일", y_order, "시간대", "요일",
-                height=max(120, 70 * len(y_order))),
+                height=max(170, 110 * len(y_order))),
         **FILL,
     )
 
@@ -347,7 +353,7 @@ def render_premium_dashboard(raw: pd.DataFrame):
     )
     st.altair_chart(
         heatmap(m, "순위라벨", "BPU", bpu_order, "우선순위", "BPU",
-                height=max(120, 70 * len(bpu_order))),
+                height=max(170, 110 * len(bpu_order))),
         **FILL,
     )
 
