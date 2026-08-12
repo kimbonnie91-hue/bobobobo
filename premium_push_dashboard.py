@@ -398,6 +398,30 @@ def render_premium_dashboard(raw: pd.DataFrame):
         s = summarize(d, ["카테고리"]).sort_values("효율", ascending=False)
         st.dataframe(as_table(s, ["카테고리"]), hide_index=True, **FILL)
 
+    st.markdown("**카테고리별 요일 × 시간대 효율**")
+    st.caption("카테고리마다 어느 요일·시간대가 잘 나오는지 나란히 비교해요. 진할수록 효율이 좋아요.")
+    cat_order = summarize(d, ["카테고리"]).sort_values("주문금액", ascending=False)["카테고리"].tolist()
+    cat_order = [c for c in cat_order if str(c).strip()]
+    if not cat_order:
+        st.info("카테고리 정보가 있는 데이터가 없어요.")
+    else:
+        cat_cols = st.columns(2)
+        for i, cat in enumerate(cat_order):
+            cat_d = d[d["카테고리"] == cat]
+            ct = summarize(cat_d, ["요일", "슬롯"])
+            if ct.empty:
+                continue
+            ct["라벨"] = ct["회차"].astype(str) + "회 · " + ct["발송"].map(f_cnt)
+            y_order = [x for x in WEEKDAY_ORDER if x in set(ct["요일"])]
+            tot_cat = summarize(cat_d).iloc[0]
+            with cat_cols[i % 2]:
+                st.markdown(f"**{cat}** · {f_cnt(tot_cat['발송'])} 발송 · 평균 효율 {f_eff(tot_cat['효율'])}")
+                st.altair_chart(
+                    heatmap(ct, "슬롯", "요일", y_order, "시간대", "요일",
+                            height=max(130, 85 * len(y_order))),
+                    **FILL,
+                )
+
     st.divider()
 
     # ------- 회차별 추이
