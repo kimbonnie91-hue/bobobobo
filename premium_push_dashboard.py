@@ -20,6 +20,7 @@ DATA_DIR에서 주차별 엑셀을 자동으로 찾거나, 없으면 업로더�
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -112,14 +113,15 @@ def summarize(df: pd.DataFrame, keys=None) -> pd.DataFrame:
             **{c: df[c].sum() for c in SUM_COLS},
         }])
 
-    발송 = t["발송"].replace(0, pd.NA)
-    uv = t["UV"].replace(0, pd.NA)
-    고객 = t["고객수"].replace(0, pd.NA)
+    def _safe_div(num, den):
+        num = num.astype(float)
+        den = den.astype(float)
+        return np.where(den > 0, num / den, np.nan)
 
-    t["효율"] = (t["주문금액"] / 발송).astype(float)
-    t["유입전환율"] = (t["UV"] / 발송).astype(float)
-    t["주문전환율"] = (t["고객수"] / uv).astype(float)
-    t["객단가"] = (t["주문금액"] / 고객).astype(float)
+    t["효율"] = _safe_div(t["주문금액"], t["발송"])
+    t["유입전환율"] = _safe_div(t["UV"], t["발송"])
+    t["주문전환율"] = _safe_div(t["고객수"], t["UV"])
+    t["객단가"] = _safe_div(t["주문금액"], t["고객수"])
     return t
 
 
