@@ -1054,9 +1054,10 @@ def main():
     # 코드를 안 고쳐도 되게 하기 위함.
     AI_MODELS = {
         "Gemini 2.5 Flash (균형)": "gemini-2.5-flash",
-        "Gemini 3.1 Pro Preview (최고 품질)": "gemini-3.1-pro-preview",
+        "Gemini 3.1 Pro Preview (최고 품질·무료 사용량 없을 수 있음)": "gemini-3.1-pro-preview",
         "Gemini 2.5 Flash-Lite (빠름·저렴)": "gemini-2.5-flash-lite",
     }
+    AI_FREE_TIER_SAFE_MODEL = "gemini-2.5-flash"  # Pro 계열은 무료 쿼터가 0인 경우가 많아 폴백 대상으로 씀
 
     def gemini_key():
         for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
@@ -1095,23 +1096,40 @@ def main():
             )
             return (resp.text or "").strip()
 
+        def _friendly_error(msg):
+            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                wait = re.search(r"retry in ([\d.]+)s", msg)
+                wait_txt = f" 약 {round(float(wait.group(1)))}초 후 다시 시도해보세요." if wait else " 잠시 후 다시 시도해보세요."
+                return (f"⏳ 이 모델의 무료 사용량 한도를 초과했어요.{wait_txt} 계속 막히면 더 가벼운 모델"
+                       "(Flash/Flash-Lite)로 바꾸거나, Google AI Studio에서 결제를 연결해보세요.")
+            return f"생성 오류: {msg}"
+
         try:
             text = _call(model)
             return (text or None), (None if text else "빈 응답"), model
         except Exception as e:
             msg = str(e)
-            # 에러 메시지는 보통 "model models/gemini-2.5-pro is no longer available ...
+            # 429(RESOURCE_EXHAUSTED)면 재시도해봐야 소용없는 경우가 많음(무료 쿼터 자체가 0인 모델,
+            # 특히 Pro 계열) — 재시도 대신 무료 쿼터가 보통 열려 있는 Flash로 한 번 자동 전환해본다.
+            if ("RESOURCE_EXHAUSTED" in msg or "429" in msg) and model != AI_FREE_TIER_SAFE_MODEL:
+                try:
+                    text = _call(AI_FREE_TIER_SAFE_MODEL)
+                    return (text or None), (None if text else "빈 응답"), AI_FREE_TIER_SAFE_MODEL
+                except Exception as e2:
+                    return None, _friendly_error(str(e2)), model
+            # 404(NOT_FOUND)는 보통 "model models/gemini-2.5-pro is no longer available ...
             # use models/gemini-3.1-pro-preview" 처럼 막힌 모델명이 먼저, 대체 모델명이 나중에 나온다 —
             # 그래서 마지막으로 언급된 모델명을 대체 후보로 쓴다(첫 번째로 하면 막힌 모델을 또 시도하게 됨).
-            alts = re.findall(r"models/([\w.\-]+)", msg)
-            alt_model = alts[-1] if alts else None
-            if alt_model and alt_model != model:
-                try:
-                    text = _call(alt_model)
-                    return (text or None), (None if text else "빈 응답"), alt_model
-                except Exception as e2:
-                    return None, f"생성 오류: {e2}", model
-            return None, f"생성 오류: {msg}", model
+            if "NOT_FOUND" in msg or "404" in msg:
+                alts = re.findall(r"models/([\w.\-]+)", msg)
+                alt_model = alts[-1] if alts else None
+                if alt_model and alt_model != model:
+                    try:
+                        text = _call(alt_model)
+                        return (text or None), (None if text else "빈 응답"), alt_model
+                    except Exception as e2:
+                        return None, _friendly_error(str(e2)), model
+            return None, _friendly_error(msg), model
 
     # ── 표 입력용 컬럼 설정 — 직접 입력 / 데이터 편집 화면에서 공용으로 사용 ──
     TXT_LABELS = {"date": "일자(YYYYMMDD)*", "dow_k": "요일", "target": "타겟구분", "stype": "발송유형",
