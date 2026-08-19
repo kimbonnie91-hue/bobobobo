@@ -1048,9 +1048,13 @@ def main():
                     yaxis=dict(gridcolor="#f1f5f9", linecolor="#e2e8f0"))
 
     # ── AI 대화 (Gemini) — 지표를 근거로 논의하는 채팅 기능에서 공용으로 사용 ──
+    # 모델명은 구글이 수시로 세대교체·구버전 폐지를 하므로(예: gemini-2.5-pro가 신규 키에는
+    # 막히고 gemini-3.1-pro-preview로 대체된 사례), ai_chat_generate가 404/NOT_FOUND 에러 메시지에
+    # 적힌 대체 모델명을 자동으로 파싱해 한 번 더 시도한다 — 하드코딩한 이름이 나중에 또 막혀도
+    # 코드를 안 고쳐도 되게 하기 위함.
     AI_MODELS = {
         "Gemini 2.5 Flash (균형)": "gemini-2.5-flash",
-        "Gemini 2.5 Pro (최고 품질)": "gemini-2.5-pro",
+        "Gemini 3.1 Pro Preview (최고 품질)": "gemini-3.1-pro-preview",
         "Gemini 2.5 Flash-Lite (빠름·저렴)": "gemini-2.5-flash-lite",
     }
 
@@ -1067,29 +1071,47 @@ def main():
         return None
 
     def ai_chat_generate(system, history, model):
-        """history: [(role, text), ...] role은 'user' 또는 'assistant'."""
+        """history: [(role, text), ...] role은 'user' 또는 'assistant'.
+        반환값: (텍스트, 에러메시지, 실제로 사용된 모델명)."""
         key = gemini_key()
         if not key:
-            return None, "GEMINI_API_KEY 미설정 — Streamlit Secrets 또는 환경변수에 추가하세요."
+            return None, "GEMINI_API_KEY 미설정 — Streamlit Secrets 또는 환경변수에 추가하세요.", model
         try:
             from google import genai
             from google.genai import types
         except ImportError:
-            return None, "google-genai 패키지가 없습니다. requirements.txt 반영 후 재배포하세요."
-        try:
-            client = genai.Client(api_key=key)
-            contents = [
-                types.Content(role=("user" if role == "user" else "model"), parts=[types.Part(text=text)])
-                for role, text in history
-            ]
+            return None, "google-genai 패키지가 없습니다. requirements.txt 반영 후 재배포하세요.", model
+
+        client = genai.Client(api_key=key)
+        contents = [
+            types.Content(role=("user" if role == "user" else "model"), parts=[types.Part(text=text)])
+            for role, text in history
+        ]
+
+        def _call(m):
             resp = client.models.generate_content(
-                model=model, contents=contents,
+                model=m, contents=contents,
                 config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=4000),
             )
-            text = (resp.text or "").strip()
-            return (text or None), (None if text else "빈 응답")
+            return (resp.text or "").strip()
+
+        try:
+            text = _call(model)
+            return (text or None), (None if text else "빈 응답"), model
         except Exception as e:
-            return None, f"생성 오류: {e}"
+            msg = str(e)
+            # 에러 메시지는 보통 "model models/gemini-2.5-pro is no longer available ...
+            # use models/gemini-3.1-pro-preview" 처럼 막힌 모델명이 먼저, 대체 모델명이 나중에 나온다 —
+            # 그래서 마지막으로 언급된 모델명을 대체 후보로 쓴다(첫 번째로 하면 막힌 모델을 또 시도하게 됨).
+            alts = re.findall(r"models/([\w.\-]+)", msg)
+            alt_model = alts[-1] if alts else None
+            if alt_model and alt_model != model:
+                try:
+                    text = _call(alt_model)
+                    return (text or None), (None if text else "빈 응답"), alt_model
+                except Exception as e2:
+                    return None, f"생성 오류: {e2}", model
+            return None, f"생성 오류: {msg}", model
 
     # ── 표 입력용 컬럼 설정 — 직접 입력 / 데이터 편집 화면에서 공용으로 사용 ──
     TXT_LABELS = {"date": "일자(YYYYMMDD)*", "dow_k": "요일", "target": "타겟구분", "stype": "발송유형",
@@ -1921,7 +1943,11 @@ def main():
             ac1, ac2 = st.columns([3, 1])
             ai_model_name = ac1.selectbox("AI 모델", list(AI_MODELS), key="uv_ai_model",
                                           index=list(AI_MODELS).index("Gemini 2.5 Flash (균형)"))
-            ai_model = AI_MODELS[ai_model_name]
+            nominal_model = AI_MODELS[ai_model_name]
+            # 이전 대화에서 이 모델이 막혀서 다른 모델로 자동 전환된 적 있으면, 이번에도 그 모델부터 씀
+            # (막힌 걸 알면서 매번 한 번 더 실패시키지 않기 위함)
+            ai_model_map = st.session_state.setdefault("uv_ai_working_model", {})
+            ai_model = ai_model_map.get(nominal_model, nominal_model)
             if ac2.button("🗑️ 대화 초기화", use_container_width=True, key="uv_ai_reset"):
                 st.session_state[ai_hist_key] = []
                 st.rerun()
@@ -1941,11 +1967,15 @@ def main():
                           f"[데이터]\n{_build_uv_ai_facts()}")
                 with st.chat_message("assistant"):
                     with st.spinner("생각 중…"):
-                        txt, err = ai_chat_generate(system, st.session_state[ai_hist_key], ai_model)
+                        txt, err, used_model = ai_chat_generate(system, st.session_state[ai_hist_key], ai_model)
                     if err:
                         st.warning(err)
                         st.session_state[ai_hist_key].pop()
                     else:
+                        if used_model != nominal_model:
+                            ai_model_map[nominal_model] = used_model
+                            st.caption(f"ℹ️ '{ai_model_name}' 모델은 더 이상 지원되지 않아 "
+                                      f"`{used_model}`로 자동 전환해서 답했어요.")
                         st.markdown(txt)
                         st.session_state[ai_hist_key].append(("assistant", txt))
 
