@@ -1269,8 +1269,8 @@ def main():
         st.sidebar.caption("아직 데이터가 없어요. '✍️ 직접 입력'에서 바로 추가하거나 엑셀을 업로드해 보세요.")
         f = df.copy()
 
-    pages = ["주간보고", "종합요약", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적", "주차별 누적 추이",
-             "우수발송 대시보드", "✍️ 직접 입력", "데이터"]
+    pages = ["주간보고", "종합요약", "UV 유입 분석", "BPU별 실적", "발송유형별 실적", "캠페인별 실적", "일자별 실적",
+             "주차별 누적 추이", "우수발송 대시보드", "✍️ 직접 입력", "데이터"]
     page = st.sidebar.radio("페이지", pages, index=(pages.index("✍️ 직접 입력") if df.empty else 0))
 
     if df.empty and page not in ("✍️ 직접 입력", "데이터"):
@@ -1675,6 +1675,168 @@ def main():
                          subset=pd.IndexSlice[n_count_rows:n_count_rows + 1, [this_label, prev_label]])
         sty = sty.format({"증감%": "{:+.1f}%"}, subset=pd.IndexSlice[:, ["증감%"]])
         st.dataframe(sty, use_container_width=True, hide_index=True)
+
+    # ══════════════════════════════════════════════════════════
+    # UV 유입 분석 — 발송모수 대비 UV 효율을 뜯어서 유효타겟 규모를 가늠하고
+    # UV 개선을 위한 긴급 대안 후보를 자동으로 찾아주는 진단 페이지
+    # ══════════════════════════════════════════════════════════
+    elif page == "UV 유입 분석":
+        st.title("UV 유입 분석")
+        st.caption("발송모수 대비 UV(신규 유입) 효율을 뜯어봐서, 실제 유효 타겟 규모를 가늠하고 "
+                  "UV를 끌어올릴 긴급 대안을 찾기 위한 페이지예요.")
+
+        if f.empty:
+            st.info("표시할 데이터가 없어요.")
+        else:
+            send_t, uv_t = f["send"].sum(), f["uv"].sum()
+            ctr_t = uv_t / send_t if send_t else 0.0
+
+            this_start = pd.Timestamp(f["week_start"].max())
+            this_end = this_start + pd.Timedelta(days=6)
+            prev_start = this_start - pd.Timedelta(days=7)
+            prev_end = this_start - pd.Timedelta(days=1)
+            cur_w = f[(f["dt"] >= this_start) & (f["dt"] <= this_end)]
+            prev_w = f[(f["dt"] >= prev_start) & (f["dt"] <= prev_end)]
+            cur_send, cur_uv = cur_w["send"].sum(), cur_w["uv"].sum()
+            prev_send, prev_uv = prev_w["send"].sum(), prev_w["uv"].sum()
+            cur_ctr = cur_uv / cur_send if cur_send else np.nan
+            prev_ctr = prev_uv / prev_send if prev_send else np.nan
+            ctr_delta_pp = (cur_ctr - prev_ctr) * 100 if pd.notna(cur_ctr) and pd.notna(prev_ctr) else np.nan
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("누적 발송모수", f"{send_t:,.0f}")
+            c2.metric("누적 UV", f"{uv_t:,.0f}")
+            c3.metric("전체 CTR(UV/발송)", f"{ctr_t:.2%}")
+            c4.metric("이번 주 CTR", f"{(cur_ctr if pd.notna(cur_ctr) else 0):.2%}",
+                      delta=(f"{ctr_delta_pp:+.2f}%p 전주 대비" if pd.notna(ctr_delta_pp) else None))
+
+            st.markdown("---")
+            st.markdown("#### 주차별 발송량 × CTR 추이")
+            st.caption("발송량은 늘어나는데 CTR이 같이 떨어지면 '같은 타겟에 반복 발송 → 피로도·타겟 소진' 신호예요.")
+            wk = f.groupby(["week_start", "week_label"], dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum")).reset_index().sort_values("week_start")
+            wk["ctr"] = np.where(wk["send"] > 0, wk["uv"] / wk["send"], np.nan)
+
+            if len(wk) < 2:
+                st.info("추이를 보려면 최소 2주 이상의 데이터가 필요해요.")
+            else:
+                fig = go.Figure()
+                fig.add_bar(x=wk["week_label"], y=wk["send"], name="발송모수", marker_color="#cbd5e1", yaxis="y")
+                fig.add_trace(go.Scatter(x=wk["week_label"], y=wk["ctr"], name="CTR", yaxis="y2",
+                                         mode="lines+markers", line=dict(color="#e53e3e", width=2)))
+                layout = base_layout(title="주차별 발송모수 · CTR 추이")
+                layout["yaxis2"] = dict(overlaying="y", side="right", showgrid=False, tickformat=".1%")
+                fig.update_layout(**layout)
+                st.plotly_chart(fig, use_container_width=True)
+
+                vals = wk["ctr"].dropna().tolist()
+                if len(vals) >= 2:
+                    first, last = vals[0], vals[-1]
+                    pct = (last - first) / first * 100 if first else None
+                    send_first, send_last = wk["send"].iloc[0], wk["send"].iloc[-1]
+                    send_pct = (send_last - send_first) / send_first * 100 if send_first else None
+                    wk_first_label = str(wk.iloc[0]["week_label"]).replace("~", "\\~")
+                    wk_last_label = str(wk.iloc[-1]["week_label"]).replace("~", "\\~")
+                    if pct is not None and pct <= -10 and (send_pct is None or send_pct >= -5):
+                        st.warning(f"🔴 CTR이 {wk_first_label} {first:.2%} → {wk_last_label} "
+                                  f"{last:.2%}({pct:+.1f}%)로 떨어지는 동안 발송량은 "
+                                  f"{'유지·증가' if (send_pct is None or send_pct >= 0) else f'{send_pct:+.1f}%'}했어요 "
+                                  "— 같은 타겟에 반복 발송하며 반응이 둔화되는 '타겟 소진' 신호일 수 있어요.")
+                    elif pct is not None and pct >= 10:
+                        st.success(f"🟢 CTR이 {first:.2%} → {last:.2%}({pct:+.1f}%)로 개선되는 흐름이에요.")
+                    else:
+                        st.info(f"CTR이 {first:.2%} → {last:.2%}로 큰 변화 없이 유지되고 있어요.")
+
+            st.markdown("---")
+            st.markdown("#### 발송모수 구간별 평균 CTR — 유효타겟 규모 가늠")
+            st.caption("발송을 많이 한 건(대량 살포)일수록 CTR이 뚜렷하게 낮다면, 그만큼 실제로 반응하는 "
+                      "유효 타겟 풀이 작다는 뜻이에요 — 많이 보내도 '덜 원하는 사람'까지 긁어야 하니까요.")
+            vf = f[f["send"] > 0].copy()
+            if len(vf) < 4:
+                st.info("구간을 나누기엔 데이터가 부족해요.")
+            else:
+                try:
+                    cats, bins = pd.qcut(vf["send"], q=4, duplicates="drop", retbins=True)
+                except ValueError:
+                    cats, bins = None, None
+                if cats is None or len(bins) < 3:
+                    st.info("발송모수 값이 너무 비슷해서 구간을 나눌 수 없어요.")
+                else:
+                    labels = [f"{int(bins[i]):,}~{int(bins[i + 1]):,}" for i in range(len(bins) - 1)]
+                    vf["발송구간"] = cats.cat.rename_categories(labels)
+                    qg = vf.groupby("발송구간", observed=True).agg(
+                        send=("send", "sum"), uv=("uv", "sum"), n=("af", "count")).reset_index()
+                    qg["ctr"] = np.where(qg["send"] > 0, qg["uv"] / qg["send"], 0.0)
+                    fig = go.Figure(go.Bar(x=qg["발송구간"].astype(str), y=qg["ctr"], marker_color="#4f8fff",
+                                           text=[f"{v:.2%} ({n}건)" for v, n in zip(qg["ctr"], qg["n"])],
+                                           textposition="outside"))
+                    layout = base_layout(title="발송모수 구간별 CTR")
+                    layout["yaxis"]["tickformat"] = ".1%"
+                    fig.update_layout(**layout)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("#### 세그먼트별 CTR 랭킹")
+            SEG_DIMS = {"bpu_group": "BPU", "brand": "브랜드", "cat": "카테고리",
+                       "stype": "발송유형", "target": "타겟구분"}
+            seg_dim = st.selectbox("기준", list(SEG_DIMS), format_func=lambda k: SEG_DIMS[k], key="uv_seg_dim")
+            seg = f[f[seg_dim].astype(str).str.strip() != ""].groupby(seg_dim, dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum")).reset_index()
+            if seg.empty:
+                st.info(f"{SEG_DIMS[seg_dim]} 정보가 있는 데이터가 없어요.")
+            else:
+                seg["ctr"] = np.where(seg["send"] > 0, seg["uv"] / seg["send"], 0.0)
+                seg["발송비중"] = seg["send"] / seg["send"].sum()
+                seg = seg.sort_values("ctr", ascending=False)
+
+                fig = go.Figure(go.Bar(x=seg["ctr"], y=seg[seg_dim].astype(str), orientation="h",
+                                       marker_color="#4f8fff"))
+                fig.update_layout(**base_layout(h=max(260, 30 * len(seg)), title=f"{SEG_DIMS[seg_dim]}별 CTR"))
+                fig.update_xaxes(tickformat=".1%")
+                fig.update_yaxes(autorange="reversed")
+                st.plotly_chart(fig, use_container_width=True)
+
+                show_seg = seg.rename(columns={seg_dim: SEG_DIMS[seg_dim], "send": "발송모수", "uv": "UV",
+                                               "ctr": "CTR"})
+                st.dataframe(show_seg[[SEG_DIMS[seg_dim], "발송모수", "UV", "CTR", "발송비중"]].style.format({
+                    "발송모수": "{:,.0f}", "UV": "{:,.0f}", "CTR": "{:.2%}", "발송비중": "{:.1%}",
+                }), use_container_width=True, hide_index=True)
+
+                st.markdown("##### 🚨 긴급 대안 후보")
+                MIN_SEND_SHARE = 0.02  # 표본이 너무 작은 세그먼트는 노이즈가 커서 제외
+                cand = seg[seg["발송비중"] >= MIN_SEND_SHARE]
+                avg_ctr = ctr_t
+                median_share = cand["발송비중"].median() if not cand.empty else 0
+                if avg_ctr > 0:
+                    expand = cand[(cand["ctr"] > avg_ctr * 1.2) & (cand["발송비중"] < median_share)].sort_values(
+                        "ctr", ascending=False).head(3)
+                    review = cand[(cand["ctr"] < avg_ctr * 0.7) & (cand["발송비중"] >= median_share)].sort_values(
+                        "ctr").head(3)
+                else:
+                    expand = review = cand.iloc[0:0]
+
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    st.markdown("**📈 확대 후보** (효율 좋은데 비중은 낮음)")
+                    if expand.empty:
+                        st.caption("조건에 맞는 후보가 없어요.")
+                    else:
+                        for _, r in expand.iterrows():
+                            st.markdown(f"- **{r[seg_dim]}**: CTR {r['ctr']:.2%} "
+                                       f"(전체 평균의 {r['ctr'] / avg_ctr:.1f}배) · 발송비중 {r['발송비중']:.1%}")
+                with ec2:
+                    st.markdown("**⚠️ 재검토 후보** (비중은 큰데 효율은 낮음)")
+                    if review.empty:
+                        st.caption("조건에 맞는 후보가 없어요.")
+                    else:
+                        for _, r in review.iterrows():
+                            st.markdown(f"- **{r[seg_dim]}**: CTR {r['ctr']:.2%} "
+                                       f"(전체 평균의 {r['ctr'] / avg_ctr:.1f}배) · 발송비중 {r['발송비중']:.1%}")
+                st.caption(f"기준: 전체 평균 CTR {avg_ctr:.2%}의 1.2배 초과 + 발송비중 중앙값({median_share:.1%}) 미만 "
+                          "→ 확대 후보 / 0.7배 미만 + 발송비중 중앙값 이상 → 재검토 후보. 발송비중 "
+                          f"{MIN_SEND_SHARE:.0%} 미만인 소표본 세그먼트는 제외했어요. "
+                          "이 페이지는 캠페인 단위 집계라 실제 중복 없는 순수 회원수(고유 UV)까지는 알 수 없다는 "
+                          "점은 참고해 주세요 — 같은 사람이 여러 캠페인에 잡힐 수 있어요.")
 
     # ══════════════════════════════════════════════════════════
     # BPU별 실적
