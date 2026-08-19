@@ -1047,6 +1047,50 @@ def main():
                     xaxis=dict(gridcolor="rgba(0,0,0,0)", linecolor="#e2e8f0"),
                     yaxis=dict(gridcolor="#f1f5f9", linecolor="#e2e8f0"))
 
+    # ── AI 대화 (Gemini) — 지표를 근거로 논의하는 채팅 기능에서 공용으로 사용 ──
+    AI_MODELS = {
+        "Gemini 2.5 Flash (균형)": "gemini-2.5-flash",
+        "Gemini 2.5 Pro (최고 품질)": "gemini-2.5-pro",
+        "Gemini 2.5 Flash-Lite (빠름·저렴)": "gemini-2.5-flash-lite",
+    }
+
+    def gemini_key():
+        for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+            try:
+                if k in st.secrets:
+                    return st.secrets[k]
+            except Exception:
+                pass
+            v = os.environ.get(k)
+            if v:
+                return v
+        return None
+
+    def ai_chat_generate(system, history, model):
+        """history: [(role, text), ...] role은 'user' 또는 'assistant'."""
+        key = gemini_key()
+        if not key:
+            return None, "GEMINI_API_KEY 미설정 — Streamlit Secrets 또는 환경변수에 추가하세요."
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError:
+            return None, "google-genai 패키지가 없습니다. requirements.txt 반영 후 재배포하세요."
+        try:
+            client = genai.Client(api_key=key)
+            contents = [
+                types.Content(role=("user" if role == "user" else "model"), parts=[types.Part(text=text)])
+                for role, text in history
+            ]
+            resp = client.models.generate_content(
+                model=model, contents=contents,
+                config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=4000),
+            )
+            text = (resp.text or "").strip()
+            return (text or None), (None if text else "빈 응답")
+        except Exception as e:
+            return None, f"생성 오류: {e}"
+
     # ── 표 입력용 컬럼 설정 — 직접 입력 / 데이터 편집 화면에서 공용으로 사용 ──
     TXT_LABELS = {"date": "일자(YYYYMMDD)*", "dow_k": "요일", "target": "타겟구분", "stype": "발송유형",
                   "bpu": "BPU", "cat": "카테고리", "attr": "속성", "owner": "담당자", "brand": "브랜드",
@@ -1837,6 +1881,73 @@ def main():
                           f"{MIN_SEND_SHARE:.0%} 미만인 소표본 세그먼트는 제외했어요. "
                           "이 페이지는 캠페인 단위 집계라 실제 중복 없는 순수 회원수(고유 UV)까지는 알 수 없다는 "
                           "점은 참고해 주세요 — 같은 사람이 여러 캠페인에 잡힐 수 있어요.")
+
+            st.markdown("---")
+            st.markdown("#### 🤖 AI와 지표 논의하기")
+            st.caption("위에서 본 지표들을 근거로 AI에게 물어보세요. 예: '지금 가장 시급한 문제가 뭐야?', "
+                      "'신규 타겟 비중을 얼마나 더 늘려야 할까?', '휴면 타겟 발송을 줄이면 거래액에 영향이 클까?'")
+
+            def _build_uv_ai_facts():
+                lines = [f"전체 기간: 누적 발송 {send_t:,.0f} · 누적 UV {uv_t:,.0f} · 전체 CTR {ctr_t:.2%}"]
+                if pd.notna(cur_ctr):
+                    lines.append(f"이번 주 CTR {cur_ctr:.2%}"
+                                 + (f" (전주 대비 {ctr_delta_pp:+.2f}%p)" if pd.notna(ctr_delta_pp) else ""))
+                fw = f.groupby(["week_start", "week_label"], dropna=False).agg(
+                    send=("send", "sum"), uv=("uv", "sum")).reset_index().sort_values("week_start")
+                fw["ctr"] = np.where(fw["send"] > 0, fw["uv"] / fw["send"], np.nan)
+                lines.append("\n주차별 발송·CTR (월~일):")
+                for _, r in fw.iterrows():
+                    if pd.notna(r["ctr"]):
+                        lines.append(f"- {r['week_label']}: 발송 {r['send']:,.0f} · UV {r['uv']:,.0f} · "
+                                     f"CTR {r['ctr']:.2%}")
+                for dim_key, dim_label in SEG_DIMS.items():
+                    sg = f[f[dim_key].astype(str).str.strip() != ""].groupby(dim_key, dropna=False).agg(
+                        send=("send", "sum"), uv=("uv", "sum")).reset_index()
+                    if sg.empty:
+                        continue
+                    sg["ctr"] = np.where(sg["send"] > 0, sg["uv"] / sg["send"], 0.0)
+                    sg["발송비중"] = sg["send"] / sg["send"].sum()
+                    sg = sg.sort_values("ctr", ascending=False)
+                    lines.append(f"\n{dim_label}별 CTR (CTR 내림차순):")
+                    for _, r in sg.iterrows():
+                        lines.append(f"- {r[dim_key]}: CTR {r['ctr']:.2%} · 발송비중 {r['발송비중']:.1%} · "
+                                     f"발송 {r['send']:,.0f}")
+                return "\n".join(lines)
+
+            ai_hist_key = "uv_ai_chat_history"
+            if ai_hist_key not in st.session_state:
+                st.session_state[ai_hist_key] = []
+
+            ac1, ac2 = st.columns([3, 1])
+            ai_model_name = ac1.selectbox("AI 모델", list(AI_MODELS), key="uv_ai_model",
+                                          index=list(AI_MODELS).index("Gemini 2.5 Flash (균형)"))
+            ai_model = AI_MODELS[ai_model_name]
+            if ac2.button("🗑️ 대화 초기화", use_container_width=True, key="uv_ai_reset"):
+                st.session_state[ai_hist_key] = []
+                st.rerun()
+
+            for role, text in st.session_state[ai_hist_key]:
+                with st.chat_message("user" if role == "user" else "assistant"):
+                    st.markdown(text)
+
+            user_q = st.chat_input("지표에 대해 질문해보세요", key="uv_ai_input")
+            if user_q:
+                st.session_state[ai_hist_key].append(("user", user_q))
+                with st.chat_message("user"):
+                    st.markdown(user_q)
+                system = ("당신은 LF몰 CRM PUSH 발송 데이터 분석가입니다. 아래 [데이터]에 있는 수치만 근거로 "
+                          "사용자와 한국어로 대화하세요. 데이터에 없는 값은 지어내지 말고 모른다고 답하세요. "
+                          "실무자가 바로 실행할 수 있도록 구체적이고 간결하게 답변하세요.\n\n"
+                          f"[데이터]\n{_build_uv_ai_facts()}")
+                with st.chat_message("assistant"):
+                    with st.spinner("생각 중…"):
+                        txt, err = ai_chat_generate(system, st.session_state[ai_hist_key], ai_model)
+                    if err:
+                        st.warning(err)
+                        st.session_state[ai_hist_key].pop()
+                    else:
+                        st.markdown(txt)
+                        st.session_state[ai_hist_key].append(("assistant", txt))
 
     # ══════════════════════════════════════════════════════════
     # BPU별 실적
