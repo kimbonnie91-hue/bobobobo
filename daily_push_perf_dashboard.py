@@ -1832,6 +1832,24 @@ def main():
                         st.info(f"CTR이 {first:.2%} → {last:.2%}로 큰 변화 없이 유지되고 있어요.")
 
             st.markdown("---")
+            st.markdown("#### 일자별 총 UV 추이")
+            st.caption("일 단위로 더 세밀하게 봐요. 주차별보다 변동은 크지만, 특정 요일·이벤트의 영향을 잡아내기 좋아요.")
+            dd = f.groupby(f["dt"].dt.date, dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum")).reset_index(names="date").sort_values("date")
+            if len(dd) < 2:
+                st.info("추이를 보려면 최소 2일 이상의 데이터가 필요해요.")
+            else:
+                fig = go.Figure(go.Scatter(x=dd["date"], y=dd["uv"], mode="lines+markers", name="UV",
+                                           line=dict(color="#4f8fff", width=2), fill="tozeroy",
+                                           fillcolor="rgba(79,143,255,0.08)",
+                                           hovertemplate="%{x}<br>UV: %{y:,.0f}<extra></extra>"))
+                fig.update_layout(**base_layout(title="일자별 총 UV 추이"))
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(f"조회 기간 {len(dd)}일 · 일평균 UV {dd['uv'].mean():,.0f} · "
+                          f"최고 {dd.loc[dd['uv'].idxmax(), 'date']}({dd['uv'].max():,.0f}) · "
+                          f"최저 {dd.loc[dd['uv'].idxmin(), 'date']}({dd['uv'].min():,.0f})")
+
+            st.markdown("---")
             st.markdown("#### 발송모수 구간별 평균 CTR — 유효타겟 규모 가늠")
             st.caption("발송을 많이 한 건(대량 살포)일수록 CTR이 뚜렷하게 낮다면, 그만큼 실제로 반응하는 "
                       "유효 타겟 풀이 작다는 뜻이에요 — 많이 보내도 '덜 원하는 사람'까지 긁어야 하니까요.")
