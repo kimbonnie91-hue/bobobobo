@@ -17,6 +17,8 @@ render_premium_dashboard(raw)에 넘기는 raw는 아래 EXPECTED_COLS와 같은
 DATA_DIR에서 주차별 엑셀을 자동으로 찾거나, 없으면 업로더를 보여줍니다.
 """
 
+import os
+import re
 from pathlib import Path
 
 import altair as alt
@@ -261,6 +263,87 @@ def share_chart(t):
 
 
 # ---------------------------------------------------------------- 화면
+
+
+# ---------------------------------------------------------------- AI 대화 (Gemini)
+# daily_push_perf_dashboard.py의 "UV 유입 분석" 페이지에 붙인 AI 채팅과 동일한 방식.
+# 이 모듈은 daily_push_perf_dashboard.py에서 import돼 쓰이기도 하고 단독 실행도
+# 되므로, 공용 함수를 거기서 가져다 쓰지 않고 이 파일 안에 그대로 둔다.
+AI_MODELS = {
+    "Gemini 2.5 Flash (균형)": "gemini-2.5-flash",
+    "Gemini 3.1 Pro Preview (최고 품질·무료 사용량 없을 수 있음)": "gemini-3.1-pro-preview",
+    "Gemini 2.5 Flash-Lite (빠름·저렴)": "gemini-2.5-flash-lite",
+}
+AI_FREE_TIER_SAFE_MODEL = "gemini-2.5-flash"
+
+
+def gemini_key():
+    for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        try:
+            if k in st.secrets:
+                return st.secrets[k]
+        except Exception:
+            pass
+        v = os.environ.get(k)
+        if v:
+            return v
+    return None
+
+
+def ai_chat_generate(system, history, model):
+    """history: [(role, text), ...] role은 'user' 또는 'assistant'.
+    반환값: (텍스트, 에러메시지, 실제로 사용된 모델명)."""
+    key = gemini_key()
+    if not key:
+        return None, "GEMINI_API_KEY 미설정 — Streamlit Secrets 또는 환경변수에 추가하세요.", model
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return None, "google-genai 패키지가 없습니다. requirements.txt 반영 후 재배포하세요.", model
+
+    client = genai.Client(api_key=key)
+    contents = [
+        types.Content(role=("user" if role == "user" else "model"), parts=[types.Part(text=text)])
+        for role, text in history
+    ]
+
+    def _call(m):
+        resp = client.models.generate_content(
+            model=m, contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=4000),
+        )
+        return (resp.text or "").strip()
+
+    def _friendly_error(msg):
+        if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+            wait = re.search(r"retry in ([\d.]+)s", msg)
+            wait_txt = f" 약 {round(float(wait.group(1)))}초 후 다시 시도해보세요." if wait else " 잠시 후 다시 시도해보세요."
+            return (f"⏳ 이 모델의 무료 사용량 한도를 초과했어요.{wait_txt} 계속 막히면 더 가벼운 모델"
+                   "(Flash/Flash-Lite)로 바꾸거나, Google AI Studio에서 결제를 연결해보세요.")
+        return f"생성 오류: {msg}"
+
+    try:
+        text = _call(model)
+        return (text or None), (None if text else "빈 응답"), model
+    except Exception as e:
+        msg = str(e)
+        if ("RESOURCE_EXHAUSTED" in msg or "429" in msg) and model != AI_FREE_TIER_SAFE_MODEL:
+            try:
+                text = _call(AI_FREE_TIER_SAFE_MODEL)
+                return (text or None), (None if text else "빈 응답"), AI_FREE_TIER_SAFE_MODEL
+            except Exception as e2:
+                return None, _friendly_error(str(e2)), model
+        if "NOT_FOUND" in msg or "404" in msg:
+            alts = re.findall(r"models/([\w.\-]+)", msg)
+            alt_model = alts[-1] if alts else None
+            if alt_model and alt_model != model:
+                try:
+                    text = _call(alt_model)
+                    return (text or None), (None if text else "빈 응답"), alt_model
+                except Exception as e2:
+                    return None, _friendly_error(str(e2)), model
+        return None, _friendly_error(msg), model
 
 
 def render_premium_dashboard(raw: pd.DataFrame):
@@ -529,6 +612,87 @@ def render_premium_dashboard(raw: pd.DataFrame):
             file_name="우수발송_소재별_원장.csv",
             mime="text/csv",
         )
+
+    st.divider()
+    st.markdown("#### 🤖 AI와 지표 논의하기")
+    st.caption("위에서 본 우수발송 지표들을 근거로 AI에게 물어보세요. 예: '이번 주 효율이 떨어진 이유가 뭐야?', "
+              "'토요일이랑 일요일 중 어디에 더 집중해야 해?', '어떤 BPU를 줄이는 게 좋을까?'")
+
+    def _build_premium_ai_facts():
+        tot = summarize(d).iloc[0]
+        lines = [
+            f"전체(필터 적용): 발송 {tot['발송']:,.0f} · UV {tot['UV']:,.0f} · 주문금액 {tot['주문금액']:,.0f}원 · "
+            f"효율 {tot['효율']:.2f} · 유입전환율 {tot['유입전환율']:.2%} · 주문전환율 {tot['주문전환율']:.2%}"
+        ]
+
+        wk = summarize(d, ["주차_정렬", "주차"]).sort_values("주차_정렬")
+        if not wk.empty:
+            lines.append("\n주차별(월~일) 효율 추이:")
+            for _, r in wk.iterrows():
+                lines.append(f"- {r['주차']}: 발송 {r['발송']:,.0f} · 효율 {r['효율']:.2f} · "
+                             f"주문금액 {r['주문금액']:,.0f}원")
+
+        dow = summarize(d, ["요일"])
+        if not dow.empty:
+            dow_order = [x for x in WEEKDAY_ORDER if x in set(dow["요일"])]
+            dow = dow.set_index("요일").loc[dow_order].reset_index()
+            lines.append("\n요일별 효율:")
+            for _, r in dow.iterrows():
+                lines.append(f"- {r['요일']}: 발송 {r['발송']:,.0f} · 효율 {r['효율']:.2f} · "
+                             f"주문전환율 {r['주문전환율']:.2%}")
+
+        for dim in ["BPU", "카테고리", "속성", "슬롯"]:
+            sg = summarize(d, [dim]) if dim in d.columns else pd.DataFrame()
+            sg = sg[sg[dim].astype(str).str.strip() != ""] if not sg.empty else sg
+            if sg.empty:
+                continue
+            sg = sg.sort_values("효율", ascending=False)
+            lines.append(f"\n{dim}별 효율 (효율 내림차순):")
+            for _, r in sg.iterrows():
+                lines.append(f"- {r[dim]}: 발송 {r['발송']:,.0f} · 효율 {r['효율']:.2f} · "
+                             f"주문금액 {r['주문금액']:,.0f}원")
+        return "\n".join(lines)
+
+    ai_hist_key = "premium_ai_chat_history"
+    if ai_hist_key not in st.session_state:
+        st.session_state[ai_hist_key] = []
+
+    ac1, ac2 = st.columns([3, 1])
+    ai_model_name = ac1.selectbox("AI 모델", list(AI_MODELS), key="premium_ai_model",
+                                  index=list(AI_MODELS).index("Gemini 2.5 Flash (균형)"))
+    nominal_model = AI_MODELS[ai_model_name]
+    ai_model_map = st.session_state.setdefault("premium_ai_working_model", {})
+    ai_model = ai_model_map.get(nominal_model, nominal_model)
+    if ac2.button("🗑️ 대화 초기화", use_container_width=True, key="premium_ai_reset"):
+        st.session_state[ai_hist_key] = []
+        st.rerun()
+
+    for role, text in st.session_state[ai_hist_key]:
+        with st.chat_message("user" if role == "user" else "assistant"):
+            st.markdown(text)
+
+    user_q = st.chat_input("지표에 대해 질문해보세요", key="premium_ai_input")
+    if user_q:
+        st.session_state[ai_hist_key].append(("user", user_q))
+        with st.chat_message("user"):
+            st.markdown(user_q)
+        system = ("당신은 LF몰 CRM 우수발송(주말) PUSH 데이터 분석가입니다. 아래 [데이터]에 있는 수치만 근거로 "
+                  "사용자와 한국어로 대화하세요. 데이터에 없는 값은 지어내지 말고 모른다고 답하세요. "
+                  "실무자가 바로 실행할 수 있도록 구체적이고 간결하게 답변하세요.\n\n"
+                  f"[데이터]\n{_build_premium_ai_facts()}")
+        with st.chat_message("assistant"):
+            with st.spinner("생각 중…"):
+                txt, err, used_model = ai_chat_generate(system, st.session_state[ai_hist_key], ai_model)
+            if err:
+                st.warning(err)
+                st.session_state[ai_hist_key].pop()
+            else:
+                if used_model != nominal_model:
+                    ai_model_map[nominal_model] = used_model
+                    st.caption(f"ℹ️ '{ai_model_name}' 모델은 더 이상 지원되지 않아 "
+                              f"`{used_model}`로 자동 전환해서 답했어요.")
+                st.markdown(txt)
+                st.session_state[ai_hist_key].append(("assistant", txt))
 
 
 # ---------------------------------------------------------------- 진입점 (단독 실행용)
