@@ -1849,6 +1849,41 @@ def main():
                           f"최고 {dd.loc[dd['uv'].idxmax(), 'date']}({dd['uv'].max():,.0f}) · "
                           f"최저 {dd.loc[dd['uv'].idxmin(), 'date']}({dd['uv'].min():,.0f})")
 
+                st.markdown("##### 전주·전월 동일자 대비")
+                st.caption("각 날짜를 정확히 7일 전(전주 동일 요일)·1개월 전 같은 날짜(전월 동일자)와 비교해요. "
+                          "비교 대상 날짜가 현재 선택한 기간보다 앞이면 '-'로 표시돼요 — 필요하면 기간을 넓혀보세요.")
+                comp = dd.copy()
+                comp["date_ts"] = pd.to_datetime(comp["date"])
+                uv_by_date = comp.set_index("date_ts")["uv"]
+
+                def _lookup(ts, offset):
+                    return uv_by_date.get(ts - offset, np.nan)
+
+                comp["전주 동일요일"] = comp["date_ts"].apply(lambda d: _lookup(d, pd.Timedelta(days=7)))
+                comp["전월 동일자"] = comp["date_ts"].apply(lambda d: _lookup(d, pd.DateOffset(months=1)))
+                comp["전주비"] = np.where(comp["전주 동일요일"] > 0,
+                                        (comp["uv"] - comp["전주 동일요일"]) / comp["전주 동일요일"] * 100, np.nan)
+                comp["전월비"] = np.where(comp["전월 동일자"] > 0,
+                                        (comp["uv"] - comp["전월 동일자"]) / comp["전월 동일자"] * 100, np.nan)
+
+                latest = comp.sort_values("date_ts").iloc[-1]
+                lc1, lc2, lc3 = st.columns(3)
+                lc1.metric(f"{latest['date']} UV", f"{latest['uv']:,.0f}")
+                lc2.metric("전주 동일요일 UV",
+                          (f"{latest['전주 동일요일']:,.0f}" if pd.notna(latest["전주 동일요일"]) else "-"),
+                          delta=(f"{latest['전주비']:+.1f}%" if pd.notna(latest["전주비"]) else None))
+                lc3.metric("전월 동일자 UV",
+                          (f"{latest['전월 동일자']:,.0f}" if pd.notna(latest["전월 동일자"]) else "-"),
+                          delta=(f"{latest['전월비']:+.1f}%" if pd.notna(latest["전월비"]) else None))
+
+                show_comp = comp.sort_values("date_ts", ascending=False)[
+                    ["date", "uv", "전주 동일요일", "전주비", "전월 동일자", "전월비"]
+                ].rename(columns={"date": "일자", "uv": "UV"})
+                st.dataframe(show_comp.style.format({
+                    "UV": "{:,.0f}", "전주 동일요일": "{:,.0f}", "전월 동일자": "{:,.0f}",
+                    "전주비": "{:+.1f}%", "전월비": "{:+.1f}%",
+                }, na_rep="-"), use_container_width=True, hide_index=True)
+
             st.markdown("---")
             st.markdown("#### 발송모수 구간별 평균 CTR — 유효타겟 규모 가늠")
             st.caption("발송을 많이 한 건(대량 살포)일수록 CTR이 뚜렷하게 낮다면, 그만큼 실제로 반응하는 "
