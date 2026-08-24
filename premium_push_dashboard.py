@@ -96,6 +96,12 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
     out["회차키"] = out["날짜"] + " " + out["슬롯"]
 
     out["BPU"] = out["BPU"].astype(str).str.strip()
+
+    # "주차"는 daily_push_perf_dashboard.py에서 넘어온 라벨 문자열(예: "8/17~8/23")이라
+    # 그대로 정렬하면 "8/3~8/9"보다 "8/17~8/23"이 사전식으로 먼저 와버린다(문자 '1'<'3').
+    # 그래서 날짜에서 직접 월요일 기준 주 시작일을 다시 계산해 정렬 전용 키로 쓴다.
+    dts = pd.to_datetime(out["날짜"], format="%Y%m%d", errors="coerce")
+    out["주차_정렬"] = (dts - pd.to_timedelta(dts.dt.dayofweek, unit="D")).dt.date
     return out
 
 
@@ -163,7 +169,7 @@ def as_table(t: pd.DataFrame, label_cols) -> pd.DataFrame:
 # ---------------------------------------------------------------- 차트
 
 
-def heatmap(t, x_field, y_field, y_order, x_title, y_title, height=180):
+def heatmap(t, x_field, y_field, y_order, x_title, y_title, height=180, x_order=None):
     """효율(발송건당 거래액) 히트맵. 셀 안에 수치를 같이 찍습니다.
 
     가독성을 위해: y축 제목은 생략(섹션 제목과 중복 + 세로로 돌아가며 라벨과 겹치는
@@ -177,7 +183,7 @@ def heatmap(t, x_field, y_field, y_order, x_title, y_title, height=180):
     cut = (lo + hi) / 2 if pd.notna(hi) else float("inf")
 
     base = alt.Chart(t).encode(
-        x=alt.X(f"{x_field}:O", title=x_title, sort=None,
+        x=alt.X(f"{x_field}:O", title=x_title, sort=x_order,
                 axis=alt.Axis(labelAngle=0, labelFontSize=12, titleFontSize=13)),
         y=alt.Y(f"{y_field}:O", title=None, sort=y_order,
                 axis=alt.Axis(labelFontSize=13, labelFontWeight="bold", labelPadding=8)),
@@ -423,6 +429,69 @@ def render_premium_dashboard(raw: pd.DataFrame):
                             height=max(130, 85 * len(y_order))),
                     **FILL,
                 )
+
+    st.divider()
+
+    # ------- 주차별 추이
+    st.subheader("주차별 효율 추이")
+    st.caption("우수발송(주말) 실적을 월~일 기준 주차로 묶어서 봐요.")
+    w = summarize(d, ["주차_정렬", "주차"]).sort_values("주차_정렬").reset_index(drop=True)
+    if len(w) < 2:
+        st.info("추이를 보려면 최소 2개 주차 이상의 데이터가 필요해요.")
+    else:
+        w["회차라벨"] = w["주차"]
+        st.altair_chart(trend_chart(w), **FILL)
+        st.caption("점선은 선택 구간의 평균 효율입니다.")
+
+        st.markdown("##### 전주 대비 비교")
+        week_options = w["주차"].tolist()
+        sel_week = st.selectbox("기준 주차", week_options, index=len(week_options) - 1, key="premium_wk_pick")
+        idx = week_options.index(sel_week)
+        cur_row = w.iloc[idx]
+        prev_row = w.iloc[idx - 1] if idx > 0 else None
+
+        def _delta_txt(cv, pv):
+            if pv is None or pd.isna(pv) or pv == 0 or cv is None or pd.isna(cv):
+                return "-"
+            pct = (cv - pv) / pv * 100
+            arrow = "▲" if pct > 0 else ("▽" if pct < 0 else "-")
+            return f"{arrow}{abs(pct):.1f}%"
+
+        wk_metrics = [
+            ("발송", "발송", f_cnt), ("UV", "UV", lambda v: f"{v:,.0f}"),
+            ("고객수", "주문고객", lambda v: f"{v:,.0f}"), ("주문금액", "거래액", f_won),
+            ("효율", "효율", f_eff), ("유입전환율", "유입전환율", f_pct),
+            ("주문전환율", "주문전환율", f_pct),
+            ("객단가", "객단가", lambda v: "-" if pd.isna(v) else f"{v:,.0f}원"),
+        ]
+        wk_rows = []
+        for key, label, fmt in wk_metrics:
+            cv = cur_row[key]
+            pv = prev_row[key] if prev_row is not None else None
+            wk_rows.append({
+                "지표": label,
+                "전주": (fmt(pv) if pv is not None and pd.notna(pv) else "-"),
+                "기준주": fmt(cv),
+                "증감%": _delta_txt(cv, pv),
+            })
+        st.dataframe(pd.DataFrame(wk_rows), hide_index=True, **FILL)
+        if prev_row is None:
+            st.caption("이 주차는 비교할 전주 데이터가 없어요(가장 이른 주차).")
+
+        st.markdown("##### 요일 × 주차 효율 히트맵")
+        st.caption("같은 주차 안에서도 토요일과 일요일 중 어느 쪽이 더 좋았는지 비교해요.")
+        wd = summarize(d, ["주차_정렬", "주차", "요일"]).sort_values("주차_정렬")
+        if wd.empty:
+            st.info("표시할 데이터가 없어요.")
+        else:
+            wd["라벨"] = wd["회차"].astype(str) + "회 · " + wd["발송"].map(f_cnt)
+            y_order = wd.drop_duplicates("주차")["주차"].tolist()
+            x_order = [x for x in WEEKDAY_ORDER if x in set(wd["요일"])]
+            st.altair_chart(
+                heatmap(wd, "요일", "주차", y_order, "요일", "주차",
+                        height=max(170, 70 * len(y_order)), x_order=x_order),
+                **FILL,
+            )
 
     st.divider()
 
