@@ -2162,23 +2162,23 @@ def main():
             fmt[metric_label] = "{:.2%}" if is_pct else "{:,.0f}"
             st.dataframe(show_top[cols].style.format(fmt), use_container_width=True, hide_index=True)
 
-        st.markdown("#### 🗓️ 컨틴구좌 배정 추천 (월~목 16시)")
-        st.caption("정책 변경으로 신설된 월~목 16시 컨틴전시 구좌에 어떤 BPU·브랜드를 배정하면 좋을지, "
+        st.markdown("#### 🗓️ 컨틴구좌 배정 추천 (월~금 16시)")
+        st.caption("정책 변경으로 신설된 월~금 16시 컨틴전시 구좌에 어떤 BPU·브랜드를 배정하면 좋을지, "
                   "'효율(그 시간대 실적)'과 '형평성(마지막 배정 이후 경과 주차)'을 함께 봐서 추천해요. "
-                  "실제 발송 기록에서 16시(hour=1600) + 월~목 발송분을 컨틴 배정 이력의 대리 지표로 사용해요.")
+                  "실제 발송 기록에서 16시(hour=1600) + 월~금 발송분을 컨틴 배정 이력의 대리 지표로 사용해요.")
 
         contin_hour = 1600
-        contin_dow = [0, 1, 2, 3]
+        contin_dow = [0, 1, 2, 3, 4]
         cf_contin = f[(f["hour"] == contin_hour) & (f["dow"].isin(contin_dow))]
 
         st.markdown("##### 1) 요일 × BPU 매칭 추천")
-        st.caption("각 BPU가 월~목 16시 중 어느 요일에 가장 효율이 좋은지 보여줘요. 진하게 표시된 셀이 "
+        st.caption("각 BPU가 월~금 16시 중 어느 요일에 가장 효율이 좋은지 보여줘요. 진하게 표시된 셀이 "
                   "그 BPU의 추천 요일이에요.")
         match_metric = st.selectbox("지표", list(RATE_LABELS), format_func=lambda k: RATE_LABELS[k],
                                     index=list(RATE_LABELS).index("rps"), key="contin_match_metric")
         bpu_main = cf_contin[cf_contin["bpu_group"].str.match(r"^\d+BPU$", na=False)]
         if bpu_main.empty:
-            st.info("월~목 16시 발송 이력이 없어서 매칭표를 만들 수 없어요.")
+            st.info("월~금 16시 발송 이력이 없어서 매칭표를 만들 수 없어요.")
         else:
             mg = bpu_main.groupby(["bpu_group", "dow"], dropna=False).agg(
                 send=("send", "sum"), uv=("uv", "sum"), oc=("oc", "sum"), amt=("amt", "sum")).reset_index()
@@ -2276,7 +2276,7 @@ def main():
                     st.dataframe(show_brand[cols_b].style.format({
                         "RPS": "{:,.0f}", "카테고리 평균 대비": "{:.0%}", "최종점수": "{:.2f}",
                     }), use_container_width=True, hide_index=True)
-                    st.caption("경과주차 999 = 이 BPU에서 월~목 16시 발송 이력이 아직 없는 브랜드(최우선 후보)예요. "
+                    st.caption("경과주차 999 = 이 BPU에서 월~금 16시 발송 이력이 아직 없는 브랜드(최우선 후보)예요. "
                               "카테고리 평균 대비 70% 미만이면 품질 가드레일 차원에서 후순위 검토를 권장해요.")
 
     # ══════════════════════════════════════════════════════════
