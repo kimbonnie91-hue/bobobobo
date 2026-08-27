@@ -2450,6 +2450,52 @@ def main():
                     "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
 
+            def render_week_detail(dframe):
+                """주차 상세: 요일마다 소재별 행 아래에 그 요일 소계(발송모수/UV/거래액 합계,
+                CR/CTR 평균)를 끼워 넣어서 보여준다."""
+                detail_cols = ["date", "dow_k", "hour", "bpu_group", "cat", "brand", "owner", "promo",
+                              "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
+                detail = dframe.sort_values("dt", ascending=True)[detail_cols]
+                st.caption(f"{len(detail):,}행")
+
+                blocks = []
+                for day in _DOW_K:
+                    day_rows = detail[detail["dow_k"] == day]
+                    if day_rows.empty:
+                        continue
+                    blocks.append(day_rows)
+                    blocks.append(pd.DataFrame([{
+                        "date": "", "dow_k": f"{day} 소계", "hour": np.nan, "bpu_group": "", "cat": "",
+                        "brand": "", "owner": "", "promo": "",
+                        "send": day_rows["send"].sum(), "uv": day_rows["uv"].sum(), "visit": np.nan,
+                        "cust": np.nan, "oc": np.nan, "amt": day_rows["amt"].sum(),
+                        "cvr": day_rows["cvr"].mean(), "ctr": day_rows["ctr"].mean(), "rps": np.nan,
+                    }]))
+                combined = pd.concat(blocks, ignore_index=True) if blocks else detail
+                is_subtotal = combined["dow_k"].astype(str).str.endswith("소계")
+
+                def _fmt(col, spec):
+                    # Streamlit의 인터랙티브 표는 숫자형 컬럼에서 Styler.format이 돌려준
+                    # 문자열을 무시하고 NaN을 그대로 "None"으로 찍는 경우가 있어(라이브러리
+                    # 버그성 동작), 아예 표시용 문자열 컬럼으로 미리 구워서 넘긴다.
+                    return combined[col].map(lambda v: "" if pd.isna(v) else spec.format(v))
+
+                show = pd.DataFrame({
+                    "일자": combined["date"], "요일": combined["dow_k"], "시간대": _fmt("hour", "{:.0f}"),
+                    "BPU": combined["bpu_group"], "카테고리": combined["cat"], "브랜드": combined["brand"],
+                    "담당자": combined["owner"], "기획전": combined["promo"],
+                    "발송모수": _fmt("send", "{:,.0f}"), "UV": _fmt("uv", "{:,.0f}"),
+                    "VISIT": _fmt("visit", "{:,.0f}"), "고객수": _fmt("cust", "{:,.0f}"),
+                    "주문건수": _fmt("oc", "{:,.0f}"), "거래액": _fmt("amt", "{:,.0f}"),
+                    "CR": _fmt("cvr", "{:.2%}"), "CTR": _fmt("ctr", "{:.2%}"), "효율": _fmt("rps", "{:,.0f}"),
+                })
+
+                def _highlight(row):
+                    style = "background-color: rgba(79,143,255,0.12); font-weight: 600"
+                    return [style if is_subtotal.iloc[row.name] else "" for _ in row]
+
+                st.dataframe(show.style.apply(_highlight, axis=1), use_container_width=True, hide_index=True)
+
             st.markdown("#### 주차별 실적")
             st.caption("왼쪽·위 필터가 적용된 데이터를 월~일 기준 주차로 묶어서 봐요. 표에서 행을 클릭하면 "
                       "그 주 월~일 발송내역을 아래에서 볼 수 있어요.")
@@ -2475,7 +2521,7 @@ def main():
                 sel_week = wk.iloc[sel_rows[0]]
                 st.markdown(f"##### {sel_week['week_label']} 주 상세 (월~일)")
                 wk_detail_f = df_detail[df_detail["week_start"] == sel_week["week_start"]]
-                render_daily_detail(wk_detail_f, ascending=True)
+                render_week_detail(wk_detail_f)
             else:
                 st.caption("👆 위 표에서 주차 행을 클릭하면 그 주 월~일 상세 내역이 여기 표시돼요.")
 
