@@ -2436,11 +2436,27 @@ def main():
             if af_pick:
                 df_detail = df_detail[df_detail["af"].isin(af_pick)]
 
+            def render_daily_detail(dframe, ascending=False):
+                detail_cols = ["date", "dow_k", "hour", "bpu_group", "cat", "brand", "owner", "promo",
+                              "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
+                detail = dframe.sort_values("dt", ascending=ascending)[detail_cols]
+                show = detail.rename(columns={"date": "일자", "dow_k": "요일", "hour": "시간대", "bpu_group": "BPU",
+                                              "cat": "카테고리", "brand": "브랜드", "owner": "담당자", "promo": "기획전",
+                                              "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
+                                              "oc": "주문건수", "amt": "거래액", "cvr": "CR", "ctr": "CTR", "rps": "효율"})
+                st.caption(f"{len(show):,}행")
+                st.dataframe(show.style.format({
+                    "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
+                    "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
+                }), use_container_width=True, hide_index=True)
+
             st.markdown("#### 주차별 실적")
-            st.caption("왼쪽·위 필터가 적용된 데이터를 월~일 기준 주차로 묶어서 봐요.")
+            st.caption("왼쪽·위 필터가 적용된 데이터를 월~일 기준 주차로 묶어서 봐요. 표에서 행을 클릭하면 "
+                      "그 주 월~일 발송내역을 아래에서 볼 수 있어요.")
             wk = df_detail.groupby(["week_start", "week_label"], dropna=False).agg(
                 send=("send", "sum"), uv=("uv", "sum"), visit=("visit", "sum"), cust=("cust", "sum"),
-                oc=("oc", "sum"), amt=("amt", "sum")).reset_index().sort_values("week_start", ascending=False)
+                oc=("oc", "sum"), amt=("amt", "sum")).reset_index().sort_values(
+                "week_start", ascending=False).reset_index(drop=True)
             wk["cvr"] = np.where(wk["uv"] > 0, wk["oc"] / wk["uv"], 0.0)
             wk["ctr"] = np.where(wk["send"] > 0, wk["uv"] / wk["send"], 0.0)
             wk["rps"] = np.where(wk["send"] > 0, wk["amt"] / wk["send"], 0.0)
@@ -2448,24 +2464,23 @@ def main():
                                          "cust": "고객수", "oc": "주문건수", "amt": "거래액",
                                          "cvr": "CR", "ctr": "CTR", "rps": "효율"})
             wk_cols = ["주차", "발송모수", "UV", "VISIT", "고객수", "주문건수", "거래액", "CR", "CTR", "효율"]
-            st.dataframe(show_wk[wk_cols].style.format({
+            wk_event = st.dataframe(show_wk[wk_cols].style.format({
                 "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
                 "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
-            }), use_container_width=True, hide_index=True)
+            }), use_container_width=True, hide_index=True,
+                on_select="rerun", selection_mode="single-row", key="daily_week_table")
+
+            sel_rows = wk_event.selection.rows if wk_event and wk_event.selection else []
+            if sel_rows:
+                sel_week = wk.iloc[sel_rows[0]]
+                st.markdown(f"##### {sel_week['week_label']} 주 상세 (월~일)")
+                wk_detail_f = df_detail[df_detail["week_start"] == sel_week["week_start"]]
+                render_daily_detail(wk_detail_f, ascending=True)
+            else:
+                st.caption("👆 위 표에서 주차 행을 클릭하면 그 주 월~일 상세 내역이 여기 표시돼요.")
 
             st.markdown("#### 일자별 상세")
-            detail_cols = ["date", "dow_k", "hour", "bpu_group", "cat", "brand", "owner", "promo",
-                          "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
-            detail = df_detail.sort_values("dt", ascending=False)[detail_cols]
-            show = detail.rename(columns={"date": "일자", "dow_k": "요일", "hour": "시간대", "bpu_group": "BPU",
-                                          "cat": "카테고리", "brand": "브랜드", "owner": "담당자", "promo": "기획전",
-                                          "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
-                                          "oc": "주문건수", "amt": "거래액", "cvr": "CR", "ctr": "CTR", "rps": "효율"})
-            st.caption(f"{len(show):,}행")
-            st.dataframe(show.style.format({
-                "시간대": "{:.0f}", "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
-                "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
-            }), use_container_width=True, hide_index=True)
+            render_daily_detail(df_detail, ascending=False)
 
     # ══════════════════════════════════════════════════════════
     # 주차별 누적 추이
