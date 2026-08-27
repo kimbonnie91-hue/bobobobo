@@ -2405,27 +2405,6 @@ def main():
         st.title("일자별 실적")
         st.caption("왼쪽 필터(기간/BPU/발송유형/검색)가 적용된 데이터를 일자 단위 행으로 봐요.")
 
-        cur_url, cur_gid, is_custom = request_copy_source()
-        with st.expander("🔗 요청문구 구글시트 연결", expanded=is_custom):
-            st.caption(("현재 **직접 연결한 시트**를 쓰고 있어요." if is_custom else
-                       "현재 **기본 시트**(발송 계획과 같은 스프레드시트의 '요청문구' 탭)를 쓰고 있어요.") +
-                      " 다른 구글시트를 연결하려면 URL을 붙여넣어 주세요 (URL에 `#gid=...`가 있으면 그 "
-                      "탭을, 없으면 첫 번째 탭을 읽어요). 기획전No./제목/내용 컬럼이 있어야 인식돼요. "
-                      "서비스 계정 이메일에 뷰어 권한 공유가 필요해요.")
-            url_input = st.text_input("구글시트 URL", value=cur_url, key="request_copy_url_input")
-            b1, b2 = st.columns(2)
-            if b1.button("🔗 연결", key="request_copy_connect", use_container_width=True):
-                st.session_state.request_copy_url = url_input.strip()
-                st.session_state.request_copy_gid = _parse_sheet_url_gid(url_input)
-                _load_request_copy_cached.clear()
-                st.rerun()
-            if b2.button("↺ 기본 시트로 되돌리기", key="request_copy_reset", use_container_width=True,
-                        disabled=not is_custom):
-                st.session_state.pop("request_copy_url", None)
-                st.session_state.pop("request_copy_gid", None)
-                _load_request_copy_cached.clear()
-                st.rerun()
-
         if f.empty:
             st.info("표시할 데이터가 없어요.")
         else:
@@ -2457,38 +2436,29 @@ def main():
             if af_pick:
                 df_detail = df_detail[df_detail["af"].isin(af_pick)]
 
-            request_copy_map, rc_key_cols, rc_err = load_request_copy_map()
-            if rc_err:
-                st.caption(f"⚠️ 요청문구 시트를 불러오지 못했어요 ({rc_err}) — 제목/내용 없이 표시해요.")
-            df_detail = df_detail.copy()
-            if rc_key_cols:
-                if rc_key_cols == ["promo"]:
-                    st.caption("ℹ️ 요청문구 시트에 일자/시간대 컬럼이 없어서 기획전No.만으로 매칭했어요.")
+            st.markdown("#### 주차별 실적")
+            st.caption("왼쪽·위 필터가 적용된 데이터를 월~일 기준 주차로 묶어서 봐요.")
+            wk = df_detail.groupby(["week_start", "week_label"], dropna=False).agg(
+                send=("send", "sum"), uv=("uv", "sum"), visit=("visit", "sum"), cust=("cust", "sum"),
+                oc=("oc", "sum"), amt=("amt", "sum")).reset_index().sort_values("week_start", ascending=False)
+            wk["cvr"] = np.where(wk["uv"] > 0, wk["oc"] / wk["uv"], 0.0)
+            wk["ctr"] = np.where(wk["send"] > 0, wk["uv"] / wk["send"], 0.0)
+            wk["rps"] = np.where(wk["send"] > 0, wk["amt"] / wk["send"], 0.0)
+            show_wk = wk.rename(columns={"week_label": "주차", "send": "발송모수", "uv": "UV", "visit": "VISIT",
+                                         "cust": "고객수", "oc": "주문건수", "amt": "거래액",
+                                         "cvr": "CR", "ctr": "CTR", "rps": "효율"})
+            wk_cols = ["주차", "발송모수", "UV", "VISIT", "고객수", "주문건수", "거래액", "CR", "CTR", "효율"]
+            st.dataframe(show_wk[wk_cols].style.format({
+                "발송모수": "{:,.0f}", "UV": "{:,.0f}", "VISIT": "{:,.0f}", "고객수": "{:,.0f}",
+                "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
+            }), use_container_width=True, hide_index=True)
 
-                def _rc_key(row, cols=rc_key_cols):
-                    vals = []
-                    for c in cols:
-                        if c == "hour":
-                            vals.append(_norm_hour_val(row["hour"]))
-                        elif c == "promo":
-                            vals.append(_norm_promo_val(row["promo"]))
-                        else:
-                            vals.append(_txt_val(row[c]))
-                    return tuple(vals)
-
-                rc_keys = df_detail.apply(_rc_key, axis=1)
-                df_detail["title"] = rc_keys.map(lambda k: request_copy_map.get(k, {}).get("title", ""))
-                df_detail["content"] = rc_keys.map(lambda k: request_copy_map.get(k, {}).get("content", ""))
-            else:
-                df_detail["title"] = ""
-                df_detail["content"] = ""
-
-            detail_cols = ["date", "hour", "bpu_group", "cat", "brand", "owner", "promo", "title", "content",
+            st.markdown("#### 일자별 상세")
+            detail_cols = ["date", "dow_k", "hour", "bpu_group", "cat", "brand", "owner", "promo",
                           "send", "uv", "visit", "cust", "oc", "amt", "cvr", "ctr", "rps"]
             detail = df_detail.sort_values("dt", ascending=False)[detail_cols]
-            show = detail.rename(columns={"date": "일자", "hour": "시간대", "bpu_group": "BPU", "cat": "카테고리",
-                                          "brand": "브랜드", "owner": "담당자", "promo": "기획전",
-                                          "title": "제목", "content": "내용",
+            show = detail.rename(columns={"date": "일자", "dow_k": "요일", "hour": "시간대", "bpu_group": "BPU",
+                                          "cat": "카테고리", "brand": "브랜드", "owner": "담당자", "promo": "기획전",
                                           "send": "발송모수", "uv": "UV", "visit": "VISIT", "cust": "고객수",
                                           "oc": "주문건수", "amt": "거래액", "cvr": "CR", "ctr": "CTR", "rps": "효율"})
             st.caption(f"{len(show):,}행")
