@@ -2450,6 +2450,39 @@ def main():
                     "주문건수": "{:,.0f}", "거래액": "{:,.0f}", "CR": "{:.2%}", "CTR": "{:.2%}", "효율": "{:,.0f}",
                 }), use_container_width=True, hide_index=True)
 
+            def _weekday_totals(dframe):
+                """요일별 소계: 발송모수/UV/거래액은 합계, CR/CTR은 평균. 실제 데이터가 있는
+                요일만, 월~일 순서로 돌려준다."""
+                rows = []
+                for day in _DOW_K:
+                    day_rows = dframe[dframe["dow_k"] == day]
+                    if day_rows.empty:
+                        continue
+                    rows.append({
+                        "요일": day, "발송모수": day_rows["send"].sum(), "UV": day_rows["uv"].sum(),
+                        "거래액": day_rows["amt"].sum(), "CR": day_rows["cvr"].mean(), "CTR": day_rows["ctr"].mean(),
+                    })
+                return pd.DataFrame(rows)
+
+            def render_weekday_chart(dframe):
+                totals = _weekday_totals(dframe)
+                if totals.empty:
+                    st.info("표시할 데이터가 없어요.")
+                    return
+                chart_metric_labels = {"발송모수": "발송모수", "UV": "UV", "거래액": "거래액",
+                                       "CR": "CR(주문/UV)", "CTR": "CTR(UV/발송)"}
+                metric = st.selectbox("지표", list(chart_metric_labels), format_func=lambda k: chart_metric_labels[k],
+                                      key="week_dow_chart_metric")
+                is_pct = metric in ("CR", "CTR")
+                text = totals[metric].map(lambda v: f"{v:.2%}" if is_pct else f"{v:,.0f}")
+                fig = go.Figure(go.Bar(x=totals["요일"], y=totals[metric], marker_color="#4f8fff",
+                                       text=text, textposition="outside"))
+                layout = base_layout(title=f"요일별 {chart_metric_labels[metric]}")
+                if is_pct:
+                    layout["yaxis"]["tickformat"] = ".1%"
+                fig.update_layout(**layout)
+                st.plotly_chart(fig, use_container_width=True)
+
             def render_week_detail(dframe):
                 """주차 상세: 요일마다 소재별 행 아래에 그 요일 소계(발송모수/UV/거래액 합계,
                 CR/CTR 평균)를 끼워 넣어서 보여준다."""
@@ -2458,18 +2491,21 @@ def main():
                 detail = dframe.sort_values("dt", ascending=True)[detail_cols]
                 st.caption(f"{len(detail):,}행")
 
+                totals_by_day = _weekday_totals(dframe).set_index("요일").to_dict("index")
+
                 blocks = []
                 for day in _DOW_K:
                     day_rows = detail[detail["dow_k"] == day]
                     if day_rows.empty:
                         continue
                     blocks.append(day_rows)
+                    t = totals_by_day[day]
                     blocks.append(pd.DataFrame([{
                         "date": "", "dow_k": f"{day} 소계", "hour": np.nan, "bpu_group": "", "cat": "",
                         "brand": "", "owner": "", "promo": "",
-                        "send": day_rows["send"].sum(), "uv": day_rows["uv"].sum(), "visit": np.nan,
-                        "cust": np.nan, "oc": np.nan, "amt": day_rows["amt"].sum(),
-                        "cvr": day_rows["cvr"].mean(), "ctr": day_rows["ctr"].mean(), "rps": np.nan,
+                        "send": t["발송모수"], "uv": t["UV"], "visit": np.nan,
+                        "cust": np.nan, "oc": np.nan, "amt": t["거래액"],
+                        "cvr": t["CR"], "ctr": t["CTR"], "rps": np.nan,
                     }]))
                 combined = pd.concat(blocks, ignore_index=True) if blocks else detail
                 is_subtotal = combined["dow_k"].astype(str).str.endswith("소계")
@@ -2521,6 +2557,10 @@ def main():
                 sel_week = wk.iloc[sel_rows[0]]
                 st.markdown(f"##### {sel_week['week_label']} 주 상세 (월~일)")
                 wk_detail_f = df_detail[df_detail["week_start"] == sel_week["week_start"]]
+
+                st.markdown("###### 요일별 소계 그래프")
+                render_weekday_chart(wk_detail_f)
+
                 render_week_detail(wk_detail_f)
             else:
                 st.caption("👆 위 표에서 주차 행을 클릭하면 그 주 월~일 상세 내역이 여기 표시돼요.")
