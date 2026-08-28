@@ -2469,19 +2469,31 @@ def main():
                 if totals.empty:
                     st.info("표시할 데이터가 없어요.")
                     return
-                chart_metric_labels = {"발송모수": "발송모수", "UV": "UV", "거래액": "거래액",
-                                       "CR": "CR(주문/UV)", "CTR": "CTR(UV/발송)"}
-                metric = st.selectbox("지표", list(chart_metric_labels), format_func=lambda k: chart_metric_labels[k],
-                                      key="week_dow_chart_metric")
-                is_pct = metric in ("CR", "CTR")
-                text = totals[metric].map(lambda v: f"{v:.2%}" if is_pct else f"{v:,.0f}")
-                fig = go.Figure(go.Bar(x=totals["요일"], y=totals[metric], marker_color="#4f8fff",
-                                       text=text, textposition="outside"))
-                layout = base_layout(title=f"요일별 {chart_metric_labels[metric]}")
-                if is_pct:
-                    layout["yaxis"]["tickformat"] = ".1%"
-                fig.update_layout(**layout)
-                st.plotly_chart(fig, use_container_width=True)
+                # 발송모수/UV/거래액/CR/CTR은 단위·규모가 서로 달라 한 차트에 같이 그리면
+                # 작은 값들이 안 보이게 되므로, 지표별 미니 차트를 나란히 배치해 한눈에 보게 한다.
+                chart_metrics = [("발송모수", False), ("UV", False), ("거래액", False),
+                                 ("CR", True), ("CTR", True)]
+                metric_full_labels = {"발송모수": "발송모수", "UV": "UV", "거래액": "거래액",
+                                      "CR": "CR(주문/UV)", "CTR": "CTR(UV/발송)"}
+
+                def _mini_chart(metric, is_pct):
+                    text = totals[metric].map(lambda v: f"{v:.1%}" if is_pct else f"{v:,.0f}")
+                    fig = go.Figure(go.Bar(x=totals["요일"], y=totals[metric], marker_color="#4f8fff",
+                                           text=text, textposition="outside"))
+                    layout = base_layout(h=220, title=metric_full_labels[metric])
+                    if is_pct:
+                        layout["yaxis"]["tickformat"] = ".0%"
+                    fig.update_layout(**layout)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                row1 = st.columns(3)
+                for col, (metric, is_pct) in zip(row1, chart_metrics[:3]):
+                    with col:
+                        _mini_chart(metric, is_pct)
+                row2 = st.columns(2)
+                for col, (metric, is_pct) in zip(row2, chart_metrics[3:]):
+                    with col:
+                        _mini_chart(metric, is_pct)
 
             def render_week_detail(dframe):
                 """주차 상세: 요일마다 소재별 행 아래에 그 요일 소계(발송모수/UV/거래액 합계,
